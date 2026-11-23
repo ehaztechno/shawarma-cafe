@@ -71,6 +71,31 @@ export interface ToastMessage {
   text: string;
 }
 
+function formatFirebaseAuthError(err: any): string {
+  const code = err?.code || '';
+  const host = typeof window !== 'undefined' ? window.location.hostname : '';
+  if (code === 'auth/unauthorized-domain') {
+    return `Domain "${host}" is not authorized in Firebase Authentication. Add "${host}" under Firebase Console → Authentication → Settings → Authorized domains (Project: formidable-trees-z5jvd).`;
+  }
+  if (code === 'auth/popup-blocked') {
+    return 'Your browser blocked the Google sign-in popup. Please allow popups or use Redirect Sign-In below.';
+  }
+  if (
+    code === 'auth/popup-closed-by-user' ||
+    code === 'auth/cancelled-popup-request' ||
+    code === 'auth/redirect-cancelled-by-user'
+  ) {
+    return 'Google sign-in was closed before finishing.';
+  }
+  if (code === 'auth/operation-not-supported-in-this-environment') {
+    return 'Popup sign-in is not supported in this browser mode. Try Redirect Sign-In below.';
+  }
+  if (code === 'auth/network-request-failed') {
+    return 'Network error while contacting Google Sign-In. Check your internet connection and try again.';
+  }
+  return `${code ? `[${code}] ` : ''}${err?.message || 'Google Sign-In failed.'}`;
+}
+
 const DEFAULT_SETTINGS: RestaurantSettings = {
   id: 'default',
   restaurantName: 'Shawarma Cafe',
@@ -363,17 +388,18 @@ export const PosProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   // Check redirect sign-in result (if fallback redirect was used on external host)
   useEffect(() => {
-    getRedirectResult(auth).catch((err: any) => {
-      const code = err?.code || '';
-      const host = typeof window !== 'undefined' ? window.location.hostname : '';
-      if (code === 'auth/unauthorized-domain') {
-        setAuthError(
-          `Domain "${host}" is not authorized in Firebase Authentication. Add "${host}" in Firebase Console → Authentication → Settings → Authorized domains.`
-        );
-      } else if (err?.message) {
-        setAuthError(err.message);
-      }
-    });
+    getRedirectResult(auth)
+      .then((cred) => {
+        if (cred?.user) {
+          setAuthError(null);
+        }
+      })
+      .catch((err: any) => {
+        const msg = formatFirebaseAuthError(err);
+        if (msg) {
+          setAuthError(msg);
+        }
+      });
   }, []);
 
   // Auth listener & User Profile Bootstrap
@@ -724,21 +750,7 @@ export const PosProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const clearAuthError = useCallback(() => setAuthError(null), []);
 
   const formatAuthErrorMessage = useCallback((err: any): string => {
-    const code = err?.code || '';
-    const host = typeof window !== 'undefined' ? window.location.hostname : '';
-    if (code === 'auth/unauthorized-domain') {
-      return `Domain "${host}" is not authorized in Firebase Authentication. Add "${host}" under Firebase Console → Authentication → Settings → Authorized domains (Project: formidable-trees-z5jvd).`;
-    }
-    if (code === 'auth/popup-blocked') {
-      return 'Your browser blocked the Google sign-in popup. Please allow popups or use Redirect Sign-In below.';
-    }
-    if (code === 'auth/popup-closed-by-user' || code === 'auth/cancelled-popup-request') {
-      return 'Google sign-in popup was closed before finishing.';
-    }
-    if (code === 'auth/operation-not-supported-in-this-environment') {
-      return 'Popup sign-in is not supported in this browser mode. Try Redirect Sign-In below.';
-    }
-    return `${code ? `[${code}] ` : ''}${err?.message || 'Google Sign-In failed.'}`;
+    return formatFirebaseAuthError(err);
   }, []);
 
   const signInWithGoogleRedirect = useCallback(async () => {
