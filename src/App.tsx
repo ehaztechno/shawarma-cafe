@@ -29,9 +29,8 @@ const PosWorkspace: React.FC = () => {
   } = usePos();
   const [mobileOpen, setMobileOpen] = useState(false);
 
-  if (authLoading || !firebaseUser || !profile || !profile.isActive || activeRole === 'PENDING') {
-    return <AuthScreen />;
-  }
+  const isAuthedStaff =
+    !authLoading && firebaseUser && profile && profile.isActive && activeRole !== 'PENDING';
 
   const renderSection = () => {
     switch (activeSection) {
@@ -65,13 +64,19 @@ const PosWorkspace: React.FC = () => {
   };
 
   return (
-    <div className="min-h-screen bg-stone-50 dark:bg-stone-950 text-stone-900 dark:text-stone-100 flex">
-      <Sidebar mobileOpen={mobileOpen} setMobileOpen={setMobileOpen} />
+    <>
+      {!isAuthedStaff ? (
+        <AuthScreen />
+      ) : (
+        <div className="min-h-screen bg-stone-50 dark:bg-stone-950 text-stone-900 dark:text-stone-100 flex">
+          <Sidebar mobileOpen={mobileOpen} setMobileOpen={setMobileOpen} />
 
-      <div className="flex-1 min-w-0 flex flex-col">
-        <TopHeader onOpenMenu={() => setMobileOpen(true)} />
-        <main className="flex-1 min-w-0">{renderSection()}</main>
-      </div>
+          <div className="flex-1 min-w-0 flex flex-col">
+            <TopHeader onOpenMenu={() => setMobileOpen(true)} />
+            <main className="flex-1 min-w-0">{renderSection()}</main>
+          </div>
+        </div>
+      )}
 
       {/* Toast Notifications */}
       {toasts.length > 0 && (
@@ -99,7 +104,7 @@ const PosWorkspace: React.FC = () => {
           ))}
         </div>
       )}
-    </div>
+    </>
   );
 };
 

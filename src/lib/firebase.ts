@@ -1,5 +1,13 @@
-import { initializeApp } from 'firebase/app';
-import { getAuth, GoogleAuthProvider } from 'firebase/auth';
+import { getApp, getApps, initializeApp } from 'firebase/app';
+import {
+  browserLocalPersistence,
+  browserPopupRedirectResolver,
+  getAuth,
+  GoogleAuthProvider,
+  indexedDBLocalPersistence,
+  initializeAuth,
+  type Auth,
+} from 'firebase/auth';
 import {
   doc,
   getDocFromServer,
@@ -9,7 +17,17 @@ import {
 } from 'firebase/firestore';
 import firebaseConfig from '../../firebase-applet-config.json';
 
-const app = initializeApp(firebaseConfig);
+const configuredAuthDomain =
+  (import.meta.env.VITE_FIREBASE_AUTH_DOMAIN as string | undefined)?.trim() ||
+  firebaseConfig.authDomain;
+
+const runtimeFirebaseConfig = {
+  ...firebaseConfig,
+  authDomain: configuredAuthDomain,
+};
+
+const app = getApps().length > 0 ? getApp() : initializeApp(runtimeFirebaseConfig);
+
 export const db = initializeFirestore(
   app,
   {
@@ -19,8 +37,25 @@ export const db = initializeFirestore(
   },
   firebaseConfig.firestoreDatabaseId
 );
-export const auth = getAuth(app);
+
+function createFirebaseAuth(): Auth {
+  try {
+    return initializeAuth(app, {
+      persistence: [indexedDBLocalPersistence, browserLocalPersistence],
+      popupRedirectResolver: browserPopupRedirectResolver,
+    });
+  } catch {
+    return getAuth(app);
+  }
+}
+
+export const auth = createFirebaseAuth();
+auth.useDeviceLanguage();
+
 export const googleAuthProvider = new GoogleAuthProvider();
+googleAuthProvider.setCustomParameters({
+  prompt: 'select_account',
+});
 
 export enum OperationType {
   CREATE = 'create',

@@ -1,7 +1,9 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import {
+  getRedirectResult,
   onAuthStateChanged,
   signInWithPopup,
+  signInWithRedirect,
   signOut,
   User,
 } from 'firebase/auth';
@@ -95,8 +97,12 @@ interface PosContextValue {
   profile: UserProfile | null;
   activeRole: StaffRole;
   authLoading: boolean;
+  signingIn: boolean;
+  authError: string | null;
+  clearAuthError: () => void;
   dataLoading: boolean;
   signInWithGoogle: () => Promise<void>;
+  signInWithGoogleRedirect: () => Promise<void>;
   logout: () => Promise<void>;
   activeSection: AppSection;
   setActiveSection: (s: AppSection) => void;
@@ -180,6 +186,8 @@ export const PosProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [firebaseUser, setFirebaseUser] = useState<User | null>(null);
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [authLoading, setAuthLoading] = useState(true);
+  const [signingIn, setSigningIn] = useState(false);
+  const [authError, setAuthError] = useState<string | null>(null);
   const [dataLoading, setDataLoading] = useState(false);
 
   const [activeSection, setActiveSectionState] = useState<AppSection>('pos');
@@ -352,6 +360,21 @@ export const PosProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     cartDiscountPercent,
     cartNotes,
   ]);
+
+  // Check redirect sign-in result (if fallback redirect was used on external host)
+  useEffect(() => {
+    getRedirectResult(auth).catch((err: any) => {
+      const code = err?.code || '';
+      const host = typeof window !== 'undefined' ? window.location.hostname : '';
+      if (code === 'auth/unauthorized-domain') {
+        setAuthError(
+          `Domain "${host}" is not authorized in Firebase Authentication. Add "${host}" in Firebase Console → Authentication → Settings → Authorized domains.`
+        );
+      } else if (err?.message) {
+        setAuthError(err.message);
+      }
+    });
+  }, []);
 
   // Auth listener & User Profile Bootstrap
   useEffect(() => {
@@ -698,15 +721,71 @@ export const PosProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     [activeRole, notify]
   );
 
+  const clearAuthError = useCallback(() => setAuthError(null), []);
+
+  const formatAuthErrorMessage = useCallback((err: any): string => {
+    const code = err?.code || '';
+    const host = typeof window !== 'undefined' ? window.location.hostname : '';
+    if (code === 'auth/unauthorized-domain') {
+      return `Domain "${host}" is not authorized in Firebase Authentication. Add "${host}" under Firebase Console → Authentication → Settings → Authorized domains (Project: formidable-trees-z5jvd).`;
+    }
+    if (code === 'auth/popup-blocked') {
+      return 'Your browser blocked the Google sign-in popup. Please allow popups or use Redirect Sign-In below.';
+    }
+    if (code === 'auth/popup-closed-by-user' || code === 'auth/cancelled-popup-request') {
+      return 'Google sign-in popup was closed before finishing.';
+    }
+    if (code === 'auth/operation-not-supported-in-this-environment') {
+      return 'Popup sign-in is not supported in this browser mode. Try Redirect Sign-In below.';
+    }
+    return `${code ? `[${code}] ` : ''}${err?.message || 'Google Sign-In failed.'}`;
+  }, []);
+
+  const signInWithGoogleRedirect = useCallback(async () => {
+    setSigningIn(true);
+    setAuthError(null);
+    try {
+      await signInWithRedirect(auth, googleAuthProvider);
+    } catch (err: any) {
+      const msg = formatAuthErrorMessage(err);
+      setAuthError(msg);
+      notify(msg, 'error');
+      setSigningIn(false);
+    }
+  }, [formatAuthErrorMessage, notify]);
+
   const signInWithGoogle = useCallback(async () => {
+    setSigningIn(true);
+    setAuthError(null);
     try {
       await signInWithPopup(auth, googleAuthProvider);
     } catch (err: any) {
-      notify(err?.message || 'Google Sign-In failed.', 'error');
+      const code = err?.code || '';
+      const isTopLevelWindow = typeof window !== 'undefined' && window.self === window.top;
+      if (
+        isTopLevelWindow &&
+        (code === 'auth/popup-blocked' || code === 'auth/operation-not-supported-in-this-environment')
+      ) {
+        try {
+          await signInWithRedirect(auth, googleAuthProvider);
+          return;
+        } catch (redirectErr: any) {
+          const msg = formatAuthErrorMessage(redirectErr);
+          setAuthError(msg);
+          notify(msg, 'error');
+        }
+      } else {
+        const msg = formatAuthErrorMessage(err);
+        setAuthError(msg);
+        notify(msg, 'error');
+      }
+    } finally {
+      setSigningIn(false);
     }
-  }, [notify]);
+  }, [formatAuthErrorMessage, notify]);
 
   const logout = useCallback(async () => {
+    setAuthError(null);
     await signOut(auth);
   }, []);
 
@@ -870,8 +949,12 @@ export const PosProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     profile,
     activeRole,
     authLoading,
+    signingIn,
+    authError,
+    clearAuthError,
     dataLoading,
     signInWithGoogle,
+    signInWithGoogleRedirect,
     logout,
     activeSection,
     setActiveSection,

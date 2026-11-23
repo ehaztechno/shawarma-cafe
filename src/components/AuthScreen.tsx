@@ -1,10 +1,26 @@
 import React from 'react';
-import { Clock, LogOut, ShieldCheck, UtensilsCrossed } from 'lucide-react';
+import { AlertTriangle, Clock, LogOut, ShieldCheck, UtensilsCrossed } from 'lucide-react';
+import firebaseConfig from '../../firebase-applet-config.json';
 import { usePos } from '../context/PosContext';
 import { PRODUCT_IMAGE_PRESETS } from '../lib/seedData';
 
 export const AuthScreen: React.FC = () => {
-  const { firebaseUser, profile, authLoading, signInWithGoogle, logout } = usePos();
+  const {
+    firebaseUser,
+    profile,
+    authLoading,
+    signingIn,
+    authError,
+    signInWithGoogle,
+    signInWithGoogleRedirect,
+    logout,
+  } = usePos();
+
+  const isTopLevelWindow = typeof window !== 'undefined' && window.self === window.top;
+  const currentOrigin = typeof window !== 'undefined' ? window.location.origin : '';
+  const showOAuthSetupDetails =
+    Boolean(authError) &&
+    /unauthorized-domain|redirect_uri_mismatch|auth\/internal-error|domain/i.test(authError || '');
 
   if (authLoading) {
     return (
@@ -101,14 +117,49 @@ export const AuthScreen: React.FC = () => {
             </p>
           </div>
 
-          <button
-            type="button"
-            onClick={signInWithGoogle}
-            className="w-full min-h-[44px] inline-flex items-center justify-center gap-3 px-5 py-3 rounded-lg bg-orange-600 hover:bg-orange-700 text-white font-semibold text-sm transition-colors cursor-pointer"
-          >
-            <ShieldCheck className="w-4 h-4" />
-            Sign In with Google
-          </button>
+          {authError && (
+            <div className="p-3.5 rounded-lg border border-red-300 dark:border-red-800 bg-red-50 dark:bg-red-950/40 text-xs text-red-800 dark:text-red-200 flex items-start gap-2.5">
+              <AlertTriangle className="w-4 h-4 text-red-600 dark:text-red-400 shrink-0 mt-0.5" />
+              <div className="space-y-1.5 leading-relaxed min-w-0">
+                <p className="font-semibold">Unable to complete Google Sign-In</p>
+                <p>{authError}</p>
+                {showOAuthSetupDetails && (
+                  <div className="pt-1.5 border-t border-red-200 dark:border-red-800/70 space-y-1 text-[11px] font-mono break-all">
+                    <p>Project: {firebaseConfig.projectId}</p>
+                    <p>OAuth Client: {firebaseConfig.oAuthClientId}</p>
+                    {currentOrigin && <p>Origin: {currentOrigin}</p>}
+                    <p>Redirect URI: https://{firebaseConfig.authDomain}/__/auth/handler</p>
+                    {currentOrigin && (
+                      <p>Proxy URI: {currentOrigin}/__/auth/handler</p>
+                    )}
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
+          <div className="space-y-2.5">
+            <button
+              type="button"
+              disabled={signingIn}
+              onClick={signInWithGoogle}
+              className="w-full min-h-[44px] inline-flex items-center justify-center gap-3 px-5 py-3 rounded-lg bg-orange-600 hover:bg-orange-700 disabled:opacity-60 text-white font-semibold text-sm transition-colors cursor-pointer"
+            >
+              <ShieldCheck className="w-4 h-4" />
+              {signingIn ? 'Opening Google Sign-In...' : 'Sign In with Google'}
+            </button>
+
+            {isTopLevelWindow && (
+              <button
+                type="button"
+                disabled={signingIn}
+                onClick={signInWithGoogleRedirect}
+                className="w-full min-h-[38px] inline-flex items-center justify-center px-4 py-2 rounded-lg border border-stone-200 dark:border-stone-700 text-xs font-medium text-stone-600 dark:text-stone-300 hover:bg-stone-100 dark:hover:bg-stone-800 disabled:opacity-60 transition-colors cursor-pointer"
+              >
+                Popup blocked? Use Redirect Sign-In
+              </button>
+            )}
+          </div>
 
           <div className="pt-2 text-xs text-stone-500 dark:text-stone-400 flex items-center justify-between">
             <span>Role-Based Access Control</span>
@@ -122,3 +173,4 @@ export const AuthScreen: React.FC = () => {
     </div>
   );
 };
+
