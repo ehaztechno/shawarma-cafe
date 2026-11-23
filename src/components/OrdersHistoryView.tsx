@@ -1,13 +1,14 @@
 import React, { useMemo, useState } from 'react';
-import { collection, getDocs } from 'firebase/firestore';
+import { collection, getDocs, query, where } from 'firebase/firestore';
 import { Ban, CreditCard, Eye, Printer, RotateCcw, Search, X } from 'lucide-react';
 import { usePos } from '../context/PosContext';
-import { db } from '../lib/firebase';
+import { db, handleFirestoreError, OperationType } from '../lib/firebase';
 import { getLocalOfflineOrder } from '../lib/offlineDb';
 import { formatCurrency, formatTimestamp, hasPermission, toDateObj } from '../lib/permissions';
 import { refundOrderPayments } from '../lib/posService';
 import {
   cancelOrderOfflineAware,
+  isLikelyNetworkError,
   isOfflineOrderId,
   recordPaymentOfflineAware,
 } from '../lib/syncEngine';
@@ -86,8 +87,18 @@ export const OrdersHistoryView: React.FC = () => {
       setInspectItems(localRec ? localRec.items : []);
       return;
     }
-    const snap = await getDocs(collection(db, 'orders', order.id, 'items'));
-    setInspectItems(snap.docs.map((d) => ({ id: d.id, ...d.data() } as OrderItem)));
+    try {
+      const snap = await getDocs(
+        query(collection(db, 'orders', order.id, 'items'), where('orderId', '==', order.id))
+      );
+      setInspectItems(snap.docs.map((d) => ({ id: d.id, ...d.data() } as OrderItem)));
+    } catch (err) {
+      if (isLikelyNetworkError(err)) {
+        setInspectItems([]);
+        return;
+      }
+      handleFirestoreError(err, OperationType.LIST, `orders/${order.id}/items`);
+    }
   };
 
   const handleCancelOrder = async (e: React.FormEvent) => {

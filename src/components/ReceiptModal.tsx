@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { collection, getDocs } from 'firebase/firestore';
+import { collection, getDocs, query, where } from 'firebase/firestore';
 import { Printer, X } from 'lucide-react';
 import { db, handleFirestoreError, OperationType } from '../lib/firebase';
 import { getLocalOfflineOrder } from '../lib/offlineDb';
@@ -37,7 +37,9 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
           }
           return;
         }
-        const snap = await getDocs(collection(db, 'orders', order.id, 'items'));
+        const snap = await getDocs(
+          query(collection(db, 'orders', order.id, 'items'), where('orderId', '==', order.id))
+        );
         if (active) {
           setItems(snap.docs.map((d) => ({ id: d.id, ...d.data() } as OrderItem)));
           setLoading(false);

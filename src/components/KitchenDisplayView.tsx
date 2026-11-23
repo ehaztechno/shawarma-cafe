@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { collection, onSnapshot } from 'firebase/firestore';
+import { collection, onSnapshot, query, where } from 'firebase/firestore';
 import { CheckCircle2, ChefHat, Clock, Printer } from 'lucide-react';
 import { usePos } from '../context/PosContext';
 import { db, handleFirestoreError, OperationType } from '../lib/firebase';
@@ -31,7 +31,7 @@ const KotOrderCard: React.FC<{
     }
 
     const unsub = onSnapshot(
-      collection(db, 'orders', order.id, 'items'),
+      query(collection(db, 'orders', order.id, 'items'), where('orderId', '==', order.id)),
       (snap) => {
         setItems(snap.docs.map((d) => ({ id: d.id, ...d.data() } as OrderItem)));
       },

@@ -424,7 +424,12 @@ export async function recordOrderPayments(params: {
   // Fetch order items before transaction if inventory deduction may be needed
   let orderItems: { productId: string; quantity: number }[] = [];
   if (params.autoDeductInventory && !params.order.inventoryDeducted) {
-    const itemsSnap = await getDocs(collection(db, 'orders', params.order.id, 'items'));
+    const itemsSnap = await getDocs(
+      query(
+        collection(db, 'orders', params.order.id, 'items'),
+        where('orderId', '==', params.order.id)
+      )
+    );
     orderItems = itemsSnap.docs.map((d) => ({
       productId: d.data().productId,
       quantity: d.data().quantity,

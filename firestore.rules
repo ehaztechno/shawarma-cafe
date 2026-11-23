@@ -689,7 +689,7 @@ service cloud.firestore {
 
       match /items/{itemId} {
         allow get: if isValidId(orderId) && isValidId(itemId) && isStaff();
-        allow list: if isValidId(orderId) && isVerified() && resource.data.orderId == orderId;
+        allow list: if isValidId(orderId) && isVerified() && (isSuperAdminToken() || resource.data.orderId == orderId);
         allow create: if isValidId(orderId) && isValidId(itemId) && isCashierOrAbove() && isValidOrderItem(incoming())
           && incoming().orderId == orderId
           && incoming().createdByUid == request.auth.uid
@@ -700,7 +700,7 @@ service cloud.firestore {
 
       match /addons/{addonEntryId} {
         allow get: if isValidId(orderId) && isValidId(addonEntryId) && isStaff();
-        allow list: if isValidId(orderId) && isVerified() && resource.data.orderId == orderId;
+        allow list: if isValidId(orderId) && isVerified() && (isSuperAdminToken() || resource.data.orderId == orderId);
         allow create: if isValidId(orderId) && isValidId(addonEntryId) && isCashierOrAbove() && isValidOrderItemAddon(incoming())
           && incoming().orderId == orderId
           && incoming().createdByUid == request.auth.uid
