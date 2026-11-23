@@ -1,0 +1,540 @@
+{
+  "entities": {
+    "UserProfile": {
+      "title": "UserProfile",
+      "description": "Authenticated staff user profile and assigned POS role.",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "email": { "type": "string", "format": "email", "maxLength": 200 },
+        "displayName": { "type": "string", "minLength": 1, "maxLength": 120 },
+        "role": { "type": "string", "enum": ["SUPER_ADMIN", "MANAGER", "CASHIER", "KITCHEN_STAFF"] },
+        "isActive": { "type": "boolean" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["uid", "email", "displayName", "role", "isActive", "createdAt", "updatedAt"]
+    },
+    "RoleDefinition": {
+      "title": "RoleDefinition",
+      "description": "Role definition and permission keys for POS staff.",
+      "type": "object",
+      "properties": {
+        "code": { "type": "string", "enum": ["SUPER_ADMIN", "MANAGER", "CASHIER", "KITCHEN_STAFF"] },
+        "label": { "type": "string", "minLength": 1, "maxLength": 60 },
+        "description": { "type": "string", "maxLength": 240 },
+        "permissions": { "type": "array", "description": "Bounded permission keys (max 25)." },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["code", "label", "permissions", "updatedAt"]
+    },
+    "StaffInvite": {
+      "title": "StaffInvite",
+      "description": "Staff directory assignment mapping email to POS role.",
+      "type": "object",
+      "properties": {
+        "email": { "type": "string", "format": "email", "maxLength": 200 },
+        "displayName": { "type": "string", "minLength": 1, "maxLength": 120 },
+        "role": { "type": "string", "enum": ["SUPER_ADMIN", "MANAGER", "CASHIER", "KITCHEN_STAFF"] },
+        "isActive": { "type": "boolean" },
+        "assignedByUid": { "type": "string", "maxLength": 128 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["email", "displayName", "role", "isActive", "assignedByUid", "createdAt", "updatedAt"]
+    },
+    "Category": {
+      "title": "Category",
+      "description": "Menu category for grouping Shawarma Cafe products.",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string", "minLength": 1, "maxLength": 80 },
+        "sortOrder": { "type": "number" },
+        "isActive": { "type": "boolean" },
+        "availableFrom": { "type": "string", "maxLength": 10 },
+        "availableTo": { "type": "string", "maxLength": 10 },
+        "createdByUid": { "type": "string", "maxLength": 128 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["name", "sortOrder", "isActive", "createdByUid", "createdAt", "updatedAt"]
+    },
+    "Product": {
+      "title": "Product",
+      "description": "Menu item available for sale at Shawarma Cafe.",
+      "type": "object",
+      "properties": {
+        "categoryId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "categoryName": { "type": "string", "minLength": 1, "maxLength": 80 },
+        "name": { "type": "string", "minLength": 1, "maxLength": 120 },
+        "description": { "type": "string", "maxLength": 300 },
+        "basePrice": { "type": "number" },
+        "imageUrl": { "type": "string", "maxLength": 500 },
+        "isAvailable": { "type": "boolean" },
+        "isVeg": { "type": "boolean" },
+        "taxRate": { "type": "number" },
+        "availableFrom": { "type": "string", "maxLength": 10 },
+        "availableTo": { "type": "string", "maxLength": 10 },
+        "addonGroupIds": { "type": "array", "description": "Bounded list of linked add-on group IDs (max 10)." },
+        "createdByUid": { "type": "string", "maxLength": 128 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["categoryId", "categoryName", "name", "basePrice", "isAvailable", "isVeg", "createdByUid", "createdAt", "updatedAt"]
+    },
+    "ProductVariant": {
+      "title": "ProductVariant",
+      "description": "Size or portion variant for a menu product.",
+      "type": "object",
+      "properties": {
+        "productId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "name": { "type": "string", "minLength": 1, "maxLength": 60 },
+        "price": { "type": "number" },
+        "isDefault": { "type": "boolean" },
+        "createdByUid": { "type": "string", "maxLength": 128 },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["productId", "name", "price", "isDefault", "createdByUid", "createdAt"]
+    },
+    "AddonGroup": {
+      "title": "AddonGroup",
+      "description": "Group of product customizations or add-ons.",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string", "minLength": 1, "maxLength": 80 },
+        "isRequired": { "type": "boolean" },
+        "maxSelect": { "type": "number" },
+        "createdByUid": { "type": "string", "maxLength": 128 },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["name", "isRequired", "maxSelect", "createdByUid", "createdAt"]
+    },
+    "Addon": {
+      "title": "Addon",
+      "description": "Individual customization or paid add-on.",
+      "type": "object",
+      "properties": {
+        "groupId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "name": { "type": "string", "minLength": 1, "maxLength": 80 },
+        "price": { "type": "number" },
+        "isAvailable": { "type": "boolean" },
+        "createdByUid": { "type": "string", "maxLength": 128 },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["groupId", "name", "price", "isAvailable", "createdByUid", "createdAt"]
+    },
+    "RestaurantTable": {
+      "title": "RestaurantTable",
+      "description": "Dine-in table tracking occupancy and active order.",
+      "type": "object",
+      "properties": {
+        "tableNumber": { "type": "string", "minLength": 1, "maxLength": 20 },
+        "name": { "type": "string", "minLength": 1, "maxLength": 60 },
+        "capacity": { "type": "number" },
+        "zone": { "type": "string", "maxLength": 40 },
+        "status": { "type": "string", "enum": ["AVAILABLE", "OCCUPIED", "RESERVED", "BILLING"] },
+        "currentOrderId": { "type": "string", "maxLength": 128 },
+        "currentOrderNumber": { "type": "string", "maxLength": 40 },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["tableNumber", "name", "capacity", "status", "updatedAt"]
+    },
+    "Customer": {
+      "title": "Customer",
+      "description": "CRM customer profile with aggregated order stats.",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string", "minLength": 1, "maxLength": 120 },
+        "phone": { "type": "string", "minLength": 5, "maxLength": 30 },
+        "address": { "type": "string", "maxLength": 300 },
+        "totalOrders": { "type": "number" },
+        "totalSpent": { "type": "number" },
+        "lastOrderAt": { "type": "string", "format": "date-time" },
+        "createdByUid": { "type": "string", "maxLength": 128 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["name", "phone", "totalOrders", "totalSpent", "createdByUid", "createdAt", "updatedAt"]
+    },
+    "Order": {
+      "title": "Order",
+      "description": "Restaurant order record with financials, KOT status, and payment summary.",
+      "type": "object",
+      "properties": {
+        "orderNumber": { "type": "string", "minLength": 1, "maxLength": 40 },
+        "orderType": { "type": "string", "enum": ["DINE_IN", "TAKEAWAY", "DELIVERY"] },
+        "status": { "type": "string", "enum": ["NEW", "PREPARING", "READY", "SERVED", "COMPLETED", "CANCELLED"] },
+        "paymentStatus": { "type": "string", "enum": ["PENDING", "PARTIAL", "PAID", "REFUNDED"] },
+        "tableId": { "type": "string", "maxLength": 128 },
+        "tableName": { "type": "string", "maxLength": 60 },
+        "customerId": { "type": "string", "maxLength": 128 },
+        "customerName": { "type": "string", "maxLength": 120 },
+        "customerPhone": { "type": "string", "maxLength": 30 },
+        "deliveryAddress": { "type": "string", "maxLength": 300 },
+        "deliveryCharge": { "type": "number" },
+        "subtotal": { "type": "number" },
+        "itemDiscountTotal": { "type": "number" },
+        "cartDiscountPercent": { "type": "number" },
+        "cartDiscountAmount": { "type": "number" },
+        "taxRate": { "type": "number" },
+        "taxAmount": { "type": "number" },
+        "serviceChargeAmount": { "type": "number" },
+        "grandTotal": { "type": "number" },
+        "paidAmount": { "type": "number" },
+        "paymentMethodsSummary": { "type": "string", "maxLength": 120 },
+        "itemCount": { "type": "number" },
+        "itemsPreview": { "type": "string", "maxLength": 400 },
+        "notes": { "type": "string", "maxLength": 300 },
+        "cancelReason": { "type": "string", "maxLength": 240 },
+        "inventoryDeducted": { "type": "boolean" },
+        "createdByUid": { "type": "string", "maxLength": 128 },
+        "createdByName": { "type": "string", "maxLength": 120 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["orderNumber", "orderType", "status", "paymentStatus", "subtotal", "taxAmount", "grandTotal", "paidAmount", "inventoryDeducted", "createdByUid", "createdByName", "createdAt", "updatedAt"]
+    },
+    "OrderItem": {
+      "title": "OrderItem",
+      "description": "Line item inside an order storing historical prices.",
+      "type": "object",
+      "properties": {
+        "orderId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "productId": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "productName": { "type": "string", "minLength": 1, "maxLength": 120 },
+        "categoryId": { "type": "string", "maxLength": 128 },
+        "categoryName": { "type": "string", "maxLength": 80 },
+        "variantId": { "type": "string", "maxLength": 128 },
+        "variantName": { "type": "string", "maxLength": 60 },
+        "unitPrice": { "type": "number" },
+        "quantity": { "type": "number" },
+        "itemDiscountAmount": { "type": "number" },
+        "addonsSummary": { "type": "string", "maxLength": 300 },
+        "addonsTotal": { "type": "number" },
+        "specialInstructions": { "type": "string", "maxLength": 240 },
+        "lineTotal": { "type": "number" },
+        "createdByUid": { "type": "string", "maxLength": 128 },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["orderId", "productId", "productName", "unitPrice", "quantity", "lineTotal", "createdByUid", "createdAt"]
+    },
+    "OrderItemAddon": {
+      "title": "OrderItemAddon",
+      "description": "Selected add-on attached to an order line item.",
+      "type": "object",
+      "properties": {
+        "orderId": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "orderItemId": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "addonId": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "addonName": { "type": "string", "minLength": 1, "maxLength": 80 },
+        "price": { "type": "number" },
+        "createdByUid": { "type": "string", "maxLength": 128 },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["orderId", "orderItemId", "addonId", "addonName", "price", "createdByUid", "createdAt"]
+    },
+    "Payment": {
+      "title": "Payment",
+      "description": "Payment transaction supporting split payments and refunds.",
+      "type": "object",
+      "properties": {
+        "orderId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "orderNumber": { "type": "string", "minLength": 1, "maxLength": 40 },
+        "method": { "type": "string", "enum": ["CASH", "UPI", "CARD", "ONLINE"] },
+        "amount": { "type": "number" },
+        "referenceNumber": { "type": "string", "maxLength": 100 },
+        "status": { "type": "string", "enum": ["COMPLETED", "REFUNDED"] },
+        "receivedByUid": { "type": "string", "maxLength": 128 },
+        "receivedByName": { "type": "string", "maxLength": 120 },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["orderId", "orderNumber", "method", "amount", "status", "receivedByUid", "receivedByName", "createdAt"]
+    },
+    "Ingredient": {
+      "title": "Ingredient",
+      "description": "Raw ingredient stock item with alert threshold.",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string", "minLength": 1, "maxLength": 100 },
+        "unit": { "type": "string", "enum": ["kg", "gram", "litre", "ml", "pieces"] },
+        "currentStock": { "type": "number" },
+        "minStockAlert": { "type": "number" },
+        "costPerUnit": { "type": "number" },
+        "supplierId": { "type": "string", "maxLength": 128 },
+        "supplierName": { "type": "string", "maxLength": 120 },
+        "createdByUid": { "type": "string", "maxLength": 128 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["name", "unit", "currentStock", "minStockAlert", "costPerUnit", "createdByUid", "createdAt", "updatedAt"]
+    },
+    "Recipe": {
+      "title": "Recipe",
+      "description": "Recipe linking a menu product to ingredient consumption.",
+      "type": "object",
+      "properties": {
+        "productId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "productName": { "type": "string", "minLength": 1, "maxLength": 120 },
+        "yieldQty": { "type": "number" },
+        "notes": { "type": "string", "maxLength": 240 },
+        "createdByUid": { "type": "string", "maxLength": 128 },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["productId", "productName", "yieldQty", "createdByUid", "updatedAt"]
+    },
+    "RecipeItem": {
+      "title": "RecipeItem",
+      "description": "Ingredient quantity required per product serving.",
+      "type": "object",
+      "properties": {
+        "recipeId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "productId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "ingredientId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "ingredientName": { "type": "string", "minLength": 1, "maxLength": 100 },
+        "unit": { "type": "string", "enum": ["kg", "gram", "litre", "ml", "pieces"] },
+        "quantityRequired": { "type": "number" },
+        "createdByUid": { "type": "string", "maxLength": 128 }
+      },
+      "required": ["recipeId", "productId", "ingredientId", "ingredientName", "unit", "quantityRequired", "createdByUid"]
+    },
+    "StockMovement": {
+      "title": "StockMovement",
+      "description": "Immutable stock adjustment, wastage, purchase, or order deduction log.",
+      "type": "object",
+      "properties": {
+        "ingredientId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "ingredientName": { "type": "string", "minLength": 1, "maxLength": 100 },
+        "type": { "type": "string", "enum": ["PURCHASE", "ORDER_DEDUCTION", "WASTAGE", "ADJUSTMENT", "RETURN"] },
+        "quantityDelta": { "type": "number" },
+        "previousStock": { "type": "number" },
+        "newStock": { "type": "number" },
+        "unit": { "type": "string", "enum": ["kg", "gram", "litre", "ml", "pieces"] },
+        "referenceId": { "type": "string", "maxLength": 128 },
+        "notes": { "type": "string", "maxLength": 240 },
+        "createdByUid": { "type": "string", "maxLength": 128 },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["ingredientId", "ingredientName", "type", "quantityDelta", "previousStock", "newStock", "unit", "createdByUid", "createdAt"]
+    },
+    "Supplier": {
+      "title": "Supplier",
+      "description": "Vendor supplying raw ingredients to Shawarma Cafe.",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string", "minLength": 1, "maxLength": 120 },
+        "contactPerson": { "type": "string", "maxLength": 100 },
+        "phone": { "type": "string", "maxLength": 30 },
+        "email": { "type": "string", "maxLength": 200 },
+        "address": { "type": "string", "maxLength": 300 },
+        "createdByUid": { "type": "string", "maxLength": 128 },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["name", "createdByUid", "createdAt"]
+    },
+    "Purchase": {
+      "title": "Purchase",
+      "description": "Stock purchase invoice header.",
+      "type": "object",
+      "properties": {
+        "supplierId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "supplierName": { "type": "string", "minLength": 1, "maxLength": 120 },
+        "invoiceNumber": { "type": "string", "maxLength": 60 },
+        "totalAmount": { "type": "number" },
+        "paymentStatus": { "type": "string", "enum": ["PAID", "PENDING"] },
+        "notes": { "type": "string", "maxLength": 240 },
+        "purchaseDate": { "type": "string", "maxLength": 30 },
+        "createdByUid": { "type": "string", "maxLength": 128 },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["supplierId", "supplierName", "totalAmount", "paymentStatus", "purchaseDate", "createdByUid", "createdAt"]
+    },
+    "PurchaseItem": {
+      "title": "PurchaseItem",
+      "description": "Line item of an ingredient stock purchase.",
+      "type": "object",
+      "properties": {
+        "purchaseId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "ingredientId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "ingredientName": { "type": "string", "minLength": 1, "maxLength": 100 },
+        "quantity": { "type": "number" },
+        "unit": { "type": "string", "enum": ["kg", "gram", "litre", "ml", "pieces"] },
+        "unitCost": { "type": "number" },
+        "totalCost": { "type": "number" },
+        "createdByUid": { "type": "string", "maxLength": 128 }
+      },
+      "required": ["purchaseId", "ingredientId", "ingredientName", "quantity", "unit", "unitCost", "totalCost", "createdByUid"]
+    },
+    "ExpenseCategory": {
+      "title": "ExpenseCategory",
+      "description": "Operating expense category.",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string", "minLength": 1, "maxLength": 80 },
+        "description": { "type": "string", "maxLength": 200 },
+        "createdByUid": { "type": "string", "maxLength": 128 },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["name", "createdByUid", "createdAt"]
+    },
+    "Expense": {
+      "title": "Expense",
+      "description": "Daily restaurant operating expense entry.",
+      "type": "object",
+      "properties": {
+        "categoryId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "categoryName": { "type": "string", "minLength": 1, "maxLength": 80 },
+        "amount": { "type": "number" },
+        "paymentMethod": { "type": "string", "enum": ["CASH", "UPI", "CARD", "BANK_TRANSFER"] },
+        "expenseDate": { "type": "string", "maxLength": 30 },
+        "notes": { "type": "string", "maxLength": 240 },
+        "recordedByUid": { "type": "string", "maxLength": 128 },
+        "recordedByName": { "type": "string", "maxLength": 120 },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["categoryId", "categoryName", "amount", "paymentMethod", "expenseDate", "recordedByUid", "recordedByName", "createdAt"]
+    },
+    "RestaurantSettings": {
+      "title": "RestaurantSettings",
+      "description": "Global restaurant configuration for billing, taxes, receipts, and hours.",
+      "type": "object",
+      "properties": {
+        "restaurantName": { "type": "string", "minLength": 1, "maxLength": 120 },
+        "address": { "type": "string", "maxLength": 300 },
+        "phone": { "type": "string", "maxLength": 30 },
+        "gstin": { "type": "string", "maxLength": 30 },
+        "currency": { "type": "string", "maxLength": 10 },
+        "currencySymbol": { "type": "string", "maxLength": 6 },
+        "taxRate": { "type": "number" },
+        "serviceChargeRate": { "type": "number" },
+        "defaultDeliveryCharge": { "type": "number" },
+        "receiptFooter": { "type": "string", "maxLength": 240 },
+        "printerWidth": { "type": "string", "enum": ["58mm", "80mm", "A4"] },
+        "orderPrefix": { "type": "string", "maxLength": 10 },
+        "nextOrderNumber": { "type": "number" },
+        "openingHours": { "type": "string", "maxLength": 100 },
+        "autoDeductInventory": { "type": "boolean" },
+        "logoUrl": { "type": "string", "maxLength": 500 },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["restaurantName", "currency", "currencySymbol", "taxRate", "serviceChargeRate", "defaultDeliveryCharge", "printerWidth", "orderPrefix", "nextOrderNumber", "autoDeductInventory", "updatedAt"]
+    },
+    "AuditLog": {
+      "title": "AuditLog",
+      "description": "Immutable audit trail for order cancellations, refunds, stock and settings changes.",
+      "type": "object",
+      "properties": {
+        "action": { "type": "string", "minLength": 1, "maxLength": 80 },
+        "entityType": { "type": "string", "minLength": 1, "maxLength": 60 },
+        "entityId": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "summary": { "type": "string", "minLength": 1, "maxLength": 300 },
+        "actorUid": { "type": "string", "maxLength": 128 },
+        "actorEmail": { "type": "string", "maxLength": 200 },
+        "actorRole": { "type": "string", "maxLength": 40 },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["action", "entityType", "entityId", "summary", "actorUid", "actorEmail", "actorRole", "createdAt"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": { "$ref": "#/entities/UserProfile" },
+      "description": "Authenticated user profiles with role mapping."
+    },
+    "/roles/{roleId}": {
+      "schema": { "$ref": "#/entities/RoleDefinition" },
+      "description": "RBAC role definitions."
+    },
+    "/staff_invites/{emailKey}": {
+      "schema": { "$ref": "#/entities/StaffInvite" },
+      "description": "Pre-assigned staff role mapping by normalized email."
+    },
+    "/categories/{categoryId}": {
+      "schema": { "$ref": "#/entities/Category" },
+      "description": "Menu categories."
+    },
+    "/products/{productId}": {
+      "schema": { "$ref": "#/entities/Product" },
+      "description": "Menu products."
+    },
+    "/product_variants/{variantId}": {
+      "schema": { "$ref": "#/entities/ProductVariant" },
+      "description": "Product size/portion variants."
+    },
+    "/addon_groups/{groupId}": {
+      "schema": { "$ref": "#/entities/AddonGroup" },
+      "description": "Customization add-on groups."
+    },
+    "/addons/{addonId}": {
+      "schema": { "$ref": "#/entities/Addon" },
+      "description": "Individual add-on options."
+    },
+    "/tables/{tableId}": {
+      "schema": { "$ref": "#/entities/RestaurantTable" },
+      "description": "Dine-in restaurant tables."
+    },
+    "/customers/{customerId}": {
+      "schema": { "$ref": "#/entities/Customer" },
+      "description": "Customer CRM records."
+    },
+    "/orders/{orderId}": {
+      "schema": { "$ref": "#/entities/Order" },
+      "description": "POS orders and KOT tickets."
+    },
+    "/orders/{orderId}/items/{itemId}": {
+      "schema": { "$ref": "#/entities/OrderItem" },
+      "description": "Line items belonging to an order."
+    },
+    "/orders/{orderId}/addons/{addonEntryId}": {
+      "schema": { "$ref": "#/entities/OrderItemAddon" },
+      "description": "Add-on selections attached to an order item."
+    },
+    "/payments/{paymentId}": {
+      "schema": { "$ref": "#/entities/Payment" },
+      "description": "Payment and refund ledger entries."
+    },
+    "/ingredients/{ingredientId}": {
+      "schema": { "$ref": "#/entities/Ingredient" },
+      "description": "Raw ingredients and stock levels."
+    },
+    "/recipes/{recipeId}": {
+      "schema": { "$ref": "#/entities/Recipe" },
+      "description": "Product recipe headers."
+    },
+    "/recipe_items/{recipeItemId}": {
+      "schema": { "$ref": "#/entities/RecipeItem" },
+      "description": "Ingredient quantities per recipe."
+    },
+    "/stock_movements/{movementId}": {
+      "schema": { "$ref": "#/entities/StockMovement" },
+      "description": "Stock movement history."
+    },
+    "/suppliers/{supplierId}": {
+      "schema": { "$ref": "#/entities/Supplier" },
+      "description": "Ingredient suppliers."
+    },
+    "/purchases/{purchaseId}": {
+      "schema": { "$ref": "#/entities/Purchase" },
+      "description": "Stock purchase invoices."
+    },
+    "/purchase_items/{purchaseItemId}": {
+      "schema": { "$ref": "#/entities/PurchaseItem" },
+      "description": "Purchased ingredient line items."
+    },
+    "/expense_categories/{categoryId}": {
+      "schema": { "$ref": "#/entities/ExpenseCategory" },
+      "description": "Expense categories."
+    },
+    "/expenses/{expenseId}": {
+      "schema": { "$ref": "#/entities/Expense" },
+      "description": "Daily expense records."
+    },
+    "/restaurant_settings/{settingId}": {
+      "schema": { "$ref": "#/entities/RestaurantSettings" },
+      "description": "Restaurant global settings."
+    },
+    "/audit_logs/{logId}": {
+      "schema": { "$ref": "#/entities/AuditLog" },
+      "description": "Audit trail for sensitive operations."
+    }
+  }
+}

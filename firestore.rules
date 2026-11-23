@@ -1,0 +1,875 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Global default deny catch-all
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // --- Primitive Helpers ---
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isVerified() {
+      return isSignedIn() && request.auth.token.email_verified == true;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function isValidEmailKey(id) {
+      return id is string && id.size() >= 3 && id.size() <= 200;
+    }
+
+    function isSuperAdminToken() {
+      return isVerified() && request.auth.token.email == 'ehaztechno@gmail.com';
+    }
+
+    function hasUserDoc() {
+      return isVerified() && exists(/databases/$(database)/documents/users/$(request.auth.uid));
+    }
+
+    function userRole() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role;
+    }
+
+    function userIsActive() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data.isActive == true;
+    }
+
+    function isSuperAdmin() {
+      return isSuperAdminToken() || (hasUserDoc() && userIsActive() && userRole() == 'SUPER_ADMIN');
+    }
+
+    function isManagerOrAdmin() {
+      return isSuperAdmin() || (hasUserDoc() && userIsActive() && userRole() in ['SUPER_ADMIN', 'MANAGER']);
+    }
+
+    function isCashierOrAbove() {
+      return isSuperAdmin() || (hasUserDoc() && userIsActive() && userRole() in ['SUPER_ADMIN', 'MANAGER', 'CASHIER']);
+    }
+
+    function isStaff() {
+      return isSuperAdmin() || (hasUserDoc() && userIsActive() && userRole() in ['SUPER_ADMIN', 'MANAGER', 'CASHIER', 'KITCHEN_STAFF']);
+    }
+
+    function isAuthorizedStaffRecord(data) {
+      return isSuperAdminToken()
+        || data.createdByUid == request.auth.uid
+        || (data.keys().hasAny(['staffUids']) && data.staffUids is list && data.staffUids.size() <= 20 && request.auth.uid in data.staffUids);
+    }
+
+    // --- Validation Blueprints ---
+    function isValidUserProfile(data) {
+      return data.keys().hasAll(['uid', 'email', 'displayName', 'role', 'isActive', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly(['uid', 'email', 'displayName', 'role', 'isActive', 'createdAt', 'updatedAt'])
+        && isValidId(data.uid)
+        && data.email is string && data.email.size() >= 3 && data.email.size() <= 200
+        && data.displayName is string && data.displayName.size() >= 1 && data.displayName.size() <= 120
+        && data.role in ['SUPER_ADMIN', 'MANAGER', 'CASHIER', 'KITCHEN_STAFF', 'PENDING']
+        && data.isActive is bool
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidRoleDef(data) {
+      return data.keys().hasAll(['code', 'label', 'description', 'permissions', 'updatedAt'])
+        && data.keys().hasOnly(['code', 'label', 'description', 'permissions', 'updatedAt'])
+        && data.code in ['SUPER_ADMIN', 'MANAGER', 'CASHIER', 'KITCHEN_STAFF']
+        && data.label is string && data.label.size() >= 1 && data.label.size() <= 60
+        && data.description is string && data.description.size() <= 240
+        && data.permissions is list && data.permissions.size() <= 25
+        && (data.permissions.size() == 0 || data.permissions[0] is string)
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidStaffInvite(data) {
+      return data.keys().hasAll(['email', 'displayName', 'role', 'isActive', 'assignedByUid', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly(['email', 'displayName', 'role', 'isActive', 'assignedByUid', 'createdAt', 'updatedAt'])
+        && data.email is string && data.email.size() >= 3 && data.email.size() <= 200
+        && data.displayName is string && data.displayName.size() >= 1 && data.displayName.size() <= 120
+        && data.role in ['SUPER_ADMIN', 'MANAGER', 'CASHIER', 'KITCHEN_STAFF']
+        && data.isActive is bool
+        && isValidId(data.assignedByUid)
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidCategory(data) {
+      return data.keys().hasAll(['name', 'sortOrder', 'isActive', 'availableFrom', 'availableTo', 'createdByUid', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly(['name', 'sortOrder', 'isActive', 'availableFrom', 'availableTo', 'createdByUid', 'createdAt', 'updatedAt'])
+        && data.name is string && data.name.size() >= 1 && data.name.size() <= 80
+        && data.sortOrder is number && data.sortOrder >= 0 && data.sortOrder <= 10000
+        && data.isActive is bool
+        && data.availableFrom is string && data.availableFrom.size() <= 10
+        && data.availableTo is string && data.availableTo.size() <= 10
+        && isValidId(data.createdByUid)
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidProduct(data) {
+      return data.keys().hasAll(['categoryId', 'categoryName', 'name', 'description', 'basePrice', 'imageUrl', 'isAvailable', 'isVeg', 'taxRate', 'availableFrom', 'availableTo', 'addonGroupIds', 'createdByUid', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly(['categoryId', 'categoryName', 'name', 'description', 'basePrice', 'imageUrl', 'isAvailable', 'isVeg', 'taxRate', 'availableFrom', 'availableTo', 'addonGroupIds', 'createdByUid', 'createdAt', 'updatedAt'])
+        && isValidId(data.categoryId)
+        && data.categoryName is string && data.categoryName.size() >= 1 && data.categoryName.size() <= 80
+        && data.name is string && data.name.size() >= 1 && data.name.size() <= 120
+        && data.description is string && data.description.size() <= 300
+        && data.basePrice is number && data.basePrice >= 0 && data.basePrice <= 1000000
+        && data.imageUrl is string && data.imageUrl.size() <= 500
+        && data.isAvailable is bool
+        && data.isVeg is bool
+        && data.taxRate is number && data.taxRate >= 0 && data.taxRate <= 100
+        && data.availableFrom is string && data.availableFrom.size() <= 10
+        && data.availableTo is string && data.availableTo.size() <= 10
+        && data.addonGroupIds is list && data.addonGroupIds.size() <= 10
+        && (data.addonGroupIds.size() == 0 || data.addonGroupIds[0] is string)
+        && isValidId(data.createdByUid)
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidProductVariant(data) {
+      return data.keys().hasAll(['productId', 'name', 'price', 'isDefault', 'createdByUid', 'createdAt'])
+        && data.keys().hasOnly(['productId', 'name', 'price', 'isDefault', 'createdByUid', 'createdAt'])
+        && isValidId(data.productId)
+        && data.name is string && data.name.size() >= 1 && data.name.size() <= 60
+        && data.price is number && data.price >= 0 && data.price <= 1000000
+        && data.isDefault is bool
+        && isValidId(data.createdByUid)
+        && data.createdAt is timestamp;
+    }
+
+    function isValidAddonGroup(data) {
+      return data.keys().hasAll(['name', 'isRequired', 'maxSelect', 'createdByUid', 'createdAt'])
+        && data.keys().hasOnly(['name', 'isRequired', 'maxSelect', 'createdByUid', 'createdAt'])
+        && data.name is string && data.name.size() >= 1 && data.name.size() <= 80
+        && data.isRequired is bool
+        && data.maxSelect is number && data.maxSelect >= 1 && data.maxSelect <= 20
+        && isValidId(data.createdByUid)
+        && data.createdAt is timestamp;
+    }
+
+    function isValidAddon(data) {
+      return data.keys().hasAll(['groupId', 'name', 'price', 'isAvailable', 'createdByUid', 'createdAt'])
+        && data.keys().hasOnly(['groupId', 'name', 'price', 'isAvailable', 'createdByUid', 'createdAt'])
+        && isValidId(data.groupId)
+        && data.name is string && data.name.size() >= 1 && data.name.size() <= 80
+        && data.price is number && data.price >= 0 && data.price <= 100000
+        && data.isAvailable is bool
+        && isValidId(data.createdByUid)
+        && data.createdAt is timestamp;
+    }
+
+    function isValidRestaurantTable(data) {
+      return data.keys().hasAll(['tableNumber', 'name', 'capacity', 'zone', 'status', 'currentOrderId', 'currentOrderNumber', 'createdByUid', 'updatedAt'])
+        && data.keys().hasOnly(['tableNumber', 'name', 'capacity', 'zone', 'status', 'currentOrderId', 'currentOrderNumber', 'createdByUid', 'updatedAt'])
+        && data.tableNumber is string && data.tableNumber.size() >= 1 && data.tableNumber.size() <= 20
+        && data.name is string && data.name.size() >= 1 && data.name.size() <= 60
+        && data.capacity is number && data.capacity >= 1 && data.capacity <= 50
+        && data.zone is string && data.zone.size() <= 40
+        && data.status in ['AVAILABLE', 'OCCUPIED', 'RESERVED', 'BILLING']
+        && data.currentOrderId is string && data.currentOrderId.size() <= 128
+        && data.currentOrderNumber is string && data.currentOrderNumber.size() <= 40
+        && isValidId(data.createdByUid)
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidCustomer(data) {
+      return data.keys().hasAll(['name', 'phone', 'address', 'totalOrders', 'totalSpent', 'lastOrderAt', 'createdByUid', 'staffUids', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly(['name', 'phone', 'address', 'totalOrders', 'totalSpent', 'lastOrderAt', 'createdByUid', 'staffUids', 'createdAt', 'updatedAt'])
+        && data.name is string && data.name.size() >= 1 && data.name.size() <= 120
+        && data.phone is string && data.phone.size() >= 5 && data.phone.size() <= 30
+        && data.address is string && data.address.size() <= 300
+        && data.totalOrders is number && data.totalOrders >= 0
+        && data.totalSpent is number && data.totalSpent >= 0
+        && data.lastOrderAt is timestamp
+        && isValidId(data.createdByUid)
+        && data.staffUids is list && data.staffUids.size() <= 20
+        && (data.staffUids.size() == 0 || data.staffUids[0] is string)
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidOrder(data) {
+      return data.keys().hasAll([
+        'orderNumber', 'orderType', 'status', 'paymentStatus', 'tableId', 'tableName',
+        'customerId', 'customerName', 'customerPhone', 'deliveryAddress', 'deliveryCharge',
+        'subtotal', 'itemDiscountTotal', 'cartDiscountPercent', 'cartDiscountAmount',
+        'taxRate', 'taxAmount', 'serviceChargeAmount', 'grandTotal', 'paidAmount',
+        'paymentMethodsSummary', 'itemCount', 'itemsPreview', 'notes', 'cancelReason',
+        'inventoryDeducted', 'createdByUid', 'createdByName', 'staffUids', 'createdAt', 'updatedAt'
+      ]) && data.keys().hasOnly([
+        'orderNumber', 'orderType', 'status', 'paymentStatus', 'tableId', 'tableName',
+        'customerId', 'customerName', 'customerPhone', 'deliveryAddress', 'deliveryCharge',
+        'subtotal', 'itemDiscountTotal', 'cartDiscountPercent', 'cartDiscountAmount',
+        'taxRate', 'taxAmount', 'serviceChargeAmount', 'grandTotal', 'paidAmount',
+        'paymentMethodsSummary', 'itemCount', 'itemsPreview', 'notes', 'cancelReason',
+        'inventoryDeducted', 'createdByUid', 'createdByName', 'staffUids', 'createdAt', 'updatedAt'
+      ])
+        && data.orderNumber is string && data.orderNumber.size() >= 1 && data.orderNumber.size() <= 40
+        && data.orderType in ['DINE_IN', 'TAKEAWAY', 'DELIVERY']
+        && data.status in ['NEW', 'PREPARING', 'READY', 'SERVED', 'COMPLETED', 'CANCELLED']
+        && data.paymentStatus in ['PENDING', 'PARTIAL', 'PAID', 'REFUNDED']
+        && data.tableId is string && data.tableId.size() <= 128
+        && data.tableName is string && data.tableName.size() <= 60
+        && data.customerId is string && data.customerId.size() <= 128
+        && data.customerName is string && data.customerName.size() <= 120
+        && data.customerPhone is string && data.customerPhone.size() <= 30
+        && data.deliveryAddress is string && data.deliveryAddress.size() <= 300
+        && data.deliveryCharge is number && data.deliveryCharge >= 0
+        && data.subtotal is number && data.subtotal >= 0
+        && data.itemDiscountTotal is number && data.itemDiscountTotal >= 0
+        && data.cartDiscountPercent is number && data.cartDiscountPercent >= 0 && data.cartDiscountPercent <= 100
+        && data.cartDiscountAmount is number && data.cartDiscountAmount >= 0
+        && data.taxRate is number && data.taxRate >= 0 && data.taxRate <= 100
+        && data.taxAmount is number && data.taxAmount >= 0
+        && data.serviceChargeAmount is number && data.serviceChargeAmount >= 0
+        && data.grandTotal is number && data.grandTotal >= 0
+        && data.paidAmount is number && data.paidAmount >= 0
+        && data.paymentMethodsSummary is string && data.paymentMethodsSummary.size() <= 120
+        && data.itemCount is number && data.itemCount >= 1 && data.itemCount <= 200
+        && data.itemsPreview is string && data.itemsPreview.size() <= 400
+        && data.notes is string && data.notes.size() <= 300
+        && data.cancelReason is string && data.cancelReason.size() <= 240
+        && data.inventoryDeducted is bool
+        && isValidId(data.createdByUid)
+        && data.createdByName is string && data.createdByName.size() >= 1 && data.createdByName.size() <= 120
+        && data.staffUids is list && data.staffUids.size() <= 20
+        && (data.staffUids.size() == 0 || data.staffUids[0] is string)
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidOrderItem(data) {
+      return data.keys().hasAll([
+        'orderId', 'productId', 'productName', 'categoryId', 'categoryName',
+        'variantId', 'variantName', 'unitPrice', 'quantity', 'itemDiscountAmount',
+        'addonsSummary', 'addonsTotal', 'specialInstructions', 'lineTotal',
+        'createdByUid', 'createdAt'
+      ]) && data.keys().hasOnly([
+        'orderId', 'productId', 'productName', 'categoryId', 'categoryName',
+        'variantId', 'variantName', 'unitPrice', 'quantity', 'itemDiscountAmount',
+        'addonsSummary', 'addonsTotal', 'specialInstructions', 'lineTotal',
+        'createdByUid', 'createdAt'
+      ])
+        && isValidId(data.orderId)
+        && isValidId(data.productId)
+        && data.productName is string && data.productName.size() >= 1 && data.productName.size() <= 120
+        && data.categoryId is string && data.categoryId.size() <= 128
+        && data.categoryName is string && data.categoryName.size() <= 80
+        && data.variantId is string && data.variantId.size() <= 128
+        && data.variantName is string && data.variantName.size() <= 60
+        && data.unitPrice is number && data.unitPrice >= 0
+        && data.quantity is number && data.quantity >= 1 && data.quantity <= 500
+        && data.itemDiscountAmount is number && data.itemDiscountAmount >= 0
+        && data.addonsSummary is string && data.addonsSummary.size() <= 300
+        && data.addonsTotal is number && data.addonsTotal >= 0
+        && data.specialInstructions is string && data.specialInstructions.size() <= 240
+        && data.lineTotal is number && data.lineTotal >= 0
+        && isValidId(data.createdByUid)
+        && data.createdAt is timestamp;
+    }
+
+    function isValidOrderItemAddon(data) {
+      return data.keys().hasAll(['orderId', 'orderItemId', 'addonId', 'addonName', 'price', 'createdByUid', 'createdAt'])
+        && data.keys().hasOnly(['orderId', 'orderItemId', 'addonId', 'addonName', 'price', 'createdByUid', 'createdAt'])
+        && isValidId(data.orderId)
+        && isValidId(data.orderItemId)
+        && isValidId(data.addonId)
+        && data.addonName is string && data.addonName.size() >= 1 && data.addonName.size() <= 80
+        && data.price is number && data.price >= 0
+        && isValidId(data.createdByUid)
+        && data.createdAt is timestamp;
+    }
+
+    function isValidPayment(data) {
+      return data.keys().hasAll(['orderId', 'orderNumber', 'method', 'amount', 'referenceNumber', 'status', 'receivedByUid', 'receivedByName', 'staffUids', 'createdAt'])
+        && data.keys().hasOnly(['orderId', 'orderNumber', 'method', 'amount', 'referenceNumber', 'status', 'receivedByUid', 'receivedByName', 'staffUids', 'createdAt'])
+        && isValidId(data.orderId)
+        && data.orderNumber is string && data.orderNumber.size() >= 1 && data.orderNumber.size() <= 40
+        && data.method in ['CASH', 'UPI', 'CARD', 'ONLINE']
+        && data.amount is number && data.amount >= 0
+        && data.referenceNumber is string && data.referenceNumber.size() <= 100
+        && data.status in ['COMPLETED', 'REFUNDED']
+        && isValidId(data.receivedByUid)
+        && data.receivedByName is string && data.receivedByName.size() >= 1 && data.receivedByName.size() <= 120
+        && data.staffUids is list && data.staffUids.size() <= 20
+        && (data.staffUids.size() == 0 || data.staffUids[0] is string)
+        && data.createdAt is timestamp;
+    }
+
+    function isValidIngredient(data) {
+      return data.keys().hasAll(['name', 'unit', 'currentStock', 'minStockAlert', 'costPerUnit', 'supplierId', 'supplierName', 'createdByUid', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly(['name', 'unit', 'currentStock', 'minStockAlert', 'costPerUnit', 'supplierId', 'supplierName', 'createdByUid', 'createdAt', 'updatedAt'])
+        && data.name is string && data.name.size() >= 1 && data.name.size() <= 100
+        && data.unit in ['kg', 'gram', 'litre', 'ml', 'pieces']
+        && data.currentStock is number && data.currentStock >= 0
+        && data.minStockAlert is number && data.minStockAlert >= 0
+        && data.costPerUnit is number && data.costPerUnit >= 0
+        && data.supplierId is string && data.supplierId.size() <= 128
+        && data.supplierName is string && data.supplierName.size() <= 120
+        && isValidId(data.createdByUid)
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidRecipe(data) {
+      return data.keys().hasAll(['productId', 'productName', 'yieldQty', 'notes', 'createdByUid', 'updatedAt'])
+        && data.keys().hasOnly(['productId', 'productName', 'yieldQty', 'notes', 'createdByUid', 'updatedAt'])
+        && isValidId(data.productId)
+        && data.productName is string && data.productName.size() >= 1 && data.productName.size() <= 120
+        && data.yieldQty is number && data.yieldQty > 0
+        && data.notes is string && data.notes.size() <= 240
+        && isValidId(data.createdByUid)
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidRecipeItem(data) {
+      return data.keys().hasAll(['recipeId', 'productId', 'ingredientId', 'ingredientName', 'unit', 'quantityRequired', 'createdByUid'])
+        && data.keys().hasOnly(['recipeId', 'productId', 'ingredientId', 'ingredientName', 'unit', 'quantityRequired', 'createdByUid'])
+        && isValidId(data.recipeId)
+        && isValidId(data.productId)
+        && isValidId(data.ingredientId)
+        && data.ingredientName is string && data.ingredientName.size() >= 1 && data.ingredientName.size() <= 100
+        && data.unit in ['kg', 'gram', 'litre', 'ml', 'pieces']
+        && data.quantityRequired is number && data.quantityRequired > 0
+        && isValidId(data.createdByUid);
+    }
+
+    function isValidStockMovement(data) {
+      return data.keys().hasAll(['ingredientId', 'ingredientName', 'type', 'quantityDelta', 'previousStock', 'newStock', 'unit', 'referenceId', 'notes', 'createdByUid', 'staffUids', 'createdAt'])
+        && data.keys().hasOnly(['ingredientId', 'ingredientName', 'type', 'quantityDelta', 'previousStock', 'newStock', 'unit', 'referenceId', 'notes', 'createdByUid', 'staffUids', 'createdAt'])
+        && isValidId(data.ingredientId)
+        && data.ingredientName is string && data.ingredientName.size() >= 1 && data.ingredientName.size() <= 100
+        && data.type in ['PURCHASE', 'ORDER_DEDUCTION', 'WASTAGE', 'ADJUSTMENT', 'RETURN']
+        && data.quantityDelta is number
+        && data.previousStock is number && data.previousStock >= 0
+        && data.newStock is number && data.newStock >= 0
+        && data.unit in ['kg', 'gram', 'litre', 'ml', 'pieces']
+        && data.referenceId is string && data.referenceId.size() <= 128
+        && data.notes is string && data.notes.size() <= 240
+        && isValidId(data.createdByUid)
+        && data.staffUids is list && data.staffUids.size() <= 20
+        && (data.staffUids.size() == 0 || data.staffUids[0] is string)
+        && data.createdAt is timestamp;
+    }
+
+    function isValidSupplier(data) {
+      return data.keys().hasAll(['name', 'contactPerson', 'phone', 'email', 'address', 'createdByUid', 'createdAt'])
+        && data.keys().hasOnly(['name', 'contactPerson', 'phone', 'email', 'address', 'createdByUid', 'createdAt'])
+        && data.name is string && data.name.size() >= 1 && data.name.size() <= 120
+        && data.contactPerson is string && data.contactPerson.size() <= 100
+        && data.phone is string && data.phone.size() <= 30
+        && data.email is string && data.email.size() <= 200
+        && data.address is string && data.address.size() <= 300
+        && isValidId(data.createdByUid)
+        && data.createdAt is timestamp;
+    }
+
+    function isValidPurchase(data) {
+      return data.keys().hasAll(['supplierId', 'supplierName', 'invoiceNumber', 'totalAmount', 'paymentStatus', 'notes', 'purchaseDate', 'createdByUid', 'staffUids', 'createdAt'])
+        && data.keys().hasOnly(['supplierId', 'supplierName', 'invoiceNumber', 'totalAmount', 'paymentStatus', 'notes', 'purchaseDate', 'createdByUid', 'staffUids', 'createdAt'])
+        && isValidId(data.supplierId)
+        && data.supplierName is string && data.supplierName.size() >= 1 && data.supplierName.size() <= 120
+        && data.invoiceNumber is string && data.invoiceNumber.size() <= 60
+        && data.totalAmount is number && data.totalAmount >= 0
+        && data.paymentStatus in ['PAID', 'PENDING']
+        && data.notes is string && data.notes.size() <= 240
+        && data.purchaseDate is string && data.purchaseDate.size() >= 4 && data.purchaseDate.size() <= 30
+        && isValidId(data.createdByUid)
+        && data.staffUids is list && data.staffUids.size() <= 20
+        && (data.staffUids.size() == 0 || data.staffUids[0] is string)
+        && data.createdAt is timestamp;
+    }
+
+    function isValidPurchaseItem(data) {
+      return data.keys().hasAll(['purchaseId', 'ingredientId', 'ingredientName', 'quantity', 'unit', 'unitCost', 'totalCost', 'createdByUid'])
+        && data.keys().hasOnly(['purchaseId', 'ingredientId', 'ingredientName', 'quantity', 'unit', 'unitCost', 'totalCost', 'createdByUid'])
+        && isValidId(data.purchaseId)
+        && isValidId(data.ingredientId)
+        && data.ingredientName is string && data.ingredientName.size() >= 1 && data.ingredientName.size() <= 100
+        && data.quantity is number && data.quantity > 0
+        && data.unit in ['kg', 'gram', 'litre', 'ml', 'pieces']
+        && data.unitCost is number && data.unitCost >= 0
+        && data.totalCost is number && data.totalCost >= 0
+        && isValidId(data.createdByUid);
+    }
+
+    function isValidExpenseCategory(data) {
+      return data.keys().hasAll(['name', 'description', 'createdByUid', 'createdAt'])
+        && data.keys().hasOnly(['name', 'description', 'createdByUid', 'createdAt'])
+        && data.name is string && data.name.size() >= 1 && data.name.size() <= 80
+        && data.description is string && data.description.size() <= 200
+        && isValidId(data.createdByUid)
+        && data.createdAt is timestamp;
+    }
+
+    function isValidExpense(data) {
+      return data.keys().hasAll(['categoryId', 'categoryName', 'amount', 'paymentMethod', 'expenseDate', 'notes', 'recordedByUid', 'recordedByName', 'staffUids', 'createdAt'])
+        && data.keys().hasOnly(['categoryId', 'categoryName', 'amount', 'paymentMethod', 'expenseDate', 'notes', 'recordedByUid', 'recordedByName', 'staffUids', 'createdAt'])
+        && isValidId(data.categoryId)
+        && data.categoryName is string && data.categoryName.size() >= 1 && data.categoryName.size() <= 80
+        && data.amount is number && data.amount > 0
+        && data.paymentMethod in ['CASH', 'UPI', 'CARD', 'BANK_TRANSFER']
+        && data.expenseDate is string && data.expenseDate.size() >= 4 && data.expenseDate.size() <= 30
+        && data.notes is string && data.notes.size() <= 240
+        && isValidId(data.recordedByUid)
+        && data.recordedByName is string && data.recordedByName.size() >= 1 && data.recordedByName.size() <= 120
+        && data.staffUids is list && data.staffUids.size() <= 20
+        && (data.staffUids.size() == 0 || data.staffUids[0] is string)
+        && data.createdAt is timestamp;
+    }
+
+    function isValidRestaurantSettings(data) {
+      return data.keys().hasAll([
+        'restaurantName', 'address', 'phone', 'gstin', 'currency', 'currencySymbol',
+        'taxRate', 'serviceChargeRate', 'defaultDeliveryCharge', 'receiptFooter',
+        'printerWidth', 'orderPrefix', 'nextOrderNumber', 'openingHours',
+        'autoDeductInventory', 'logoUrl', 'updatedAt'
+      ]) && data.keys().hasOnly([
+        'restaurantName', 'address', 'phone', 'gstin', 'currency', 'currencySymbol',
+        'taxRate', 'serviceChargeRate', 'defaultDeliveryCharge', 'receiptFooter',
+        'printerWidth', 'orderPrefix', 'nextOrderNumber', 'openingHours',
+        'autoDeductInventory', 'logoUrl', 'updatedAt'
+      ])
+        && data.restaurantName is string && data.restaurantName.size() >= 1 && data.restaurantName.size() <= 120
+        && data.address is string && data.address.size() <= 300
+        && data.phone is string && data.phone.size() <= 30
+        && data.gstin is string && data.gstin.size() <= 30
+        && data.currency is string && data.currency.size() >= 1 && data.currency.size() <= 10
+        && data.currencySymbol is string && data.currencySymbol.size() >= 1 && data.currencySymbol.size() <= 6
+        && data.taxRate is number && data.taxRate >= 0 && data.taxRate <= 50
+        && data.serviceChargeRate is number && data.serviceChargeRate >= 0 && data.serviceChargeRate <= 50
+        && data.defaultDeliveryCharge is number && data.defaultDeliveryCharge >= 0
+        && data.receiptFooter is string && data.receiptFooter.size() <= 240
+        && data.printerWidth in ['58mm', '80mm', 'A4']
+        && data.orderPrefix is string && data.orderPrefix.size() >= 1 && data.orderPrefix.size() <= 10
+        && data.nextOrderNumber is number && data.nextOrderNumber >= 1
+        && data.openingHours is string && data.openingHours.size() <= 100
+        && data.autoDeductInventory is bool
+        && data.logoUrl is string && data.logoUrl.size() <= 500
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidAuditLog(data) {
+      return data.keys().hasAll(['action', 'entityType', 'entityId', 'summary', 'actorUid', 'actorEmail', 'actorRole', 'staffUids', 'createdAt'])
+        && data.keys().hasOnly(['action', 'entityType', 'entityId', 'summary', 'actorUid', 'actorEmail', 'actorRole', 'staffUids', 'createdAt'])
+        && data.action is string && data.action.size() >= 1 && data.action.size() <= 80
+        && data.entityType is string && data.entityType.size() >= 1 && data.entityType.size() <= 60
+        && data.entityId is string && data.entityId.size() >= 1 && data.entityId.size() <= 128
+        && data.summary is string && data.summary.size() >= 1 && data.summary.size() <= 300
+        && isValidId(data.actorUid)
+        && data.actorEmail is string && data.actorEmail.size() <= 200
+        && data.actorRole is string && data.actorRole.size() >= 1 && data.actorRole.size() <= 40
+        && data.staffUids is list && data.staffUids.size() <= 20
+        && (data.staffUids.size() == 0 || data.staffUids[0] is string)
+        && data.createdAt is timestamp;
+    }
+
+    // --- Collection Rules ---
+
+    // Connection test document
+    match /test/connection {
+      allow get: if true;
+    }
+
+    // Users (PII isolated: owner or admin/manager only)
+    match /users/{userId} {
+      allow get: if isValidId(userId) && isVerified() && (isSuperAdminToken() || request.auth.uid == userId || isManagerOrAdmin());
+      allow list: if isVerified() && (isSuperAdminToken() || resource.data.uid == request.auth.uid);
+      allow create: if isValidId(userId) && isVerified() && isValidUserProfile(incoming())
+        && incoming().uid == userId
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time
+        && (
+          isSuperAdminToken()
+          || (
+            incoming().uid == request.auth.uid
+            && incoming().email == request.auth.token.email
+            && (
+              (
+                exists(/databases/$(database)/documents/staff_invites/$(request.auth.token.email))
+                && get(/databases/$(database)/documents/staff_invites/$(request.auth.token.email)).data.isActive == true
+                && incoming().role == get(/databases/$(database)/documents/staff_invites/$(request.auth.token.email)).data.role
+                && incoming().isActive == true
+              )
+              || (
+                !exists(/databases/$(database)/documents/staff_invites/$(request.auth.token.email))
+                && incoming().role == 'PENDING'
+                && incoming().isActive == false
+              )
+            )
+          )
+        );
+      allow update: if isValidId(userId) && isVerified() && isValidUserProfile(incoming())
+        && incoming().uid == existing().uid
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && (
+          (isSuperAdmin() && incoming().diff(existing()).affectedKeys().hasOnly(['displayName', 'role', 'isActive', 'updatedAt']))
+          || (isManagerOrAdmin() && existing().role != 'SUPER_ADMIN' && incoming().role != 'SUPER_ADMIN' && incoming().diff(existing()).affectedKeys().hasOnly(['displayName', 'role', 'isActive', 'updatedAt']))
+          || (request.auth.uid == userId && incoming().role == existing().role && incoming().isActive == existing().isActive && incoming().diff(existing()).affectedKeys().hasOnly(['displayName', 'updatedAt']))
+        );
+      allow delete: if isValidId(userId) && isSuperAdmin() && userId != request.auth.uid;
+    }
+
+    match /roles/{roleId} {
+      allow get: if isValidId(roleId) && isStaff();
+      allow list: if isVerified() && resource.data.code in ['SUPER_ADMIN', 'MANAGER', 'CASHIER', 'KITCHEN_STAFF'];
+      allow create: if isValidId(roleId) && isSuperAdmin() && isValidRoleDef(incoming()) && incoming().updatedAt == request.time;
+      allow update: if isValidId(roleId) && isSuperAdmin() && isValidRoleDef(incoming())
+        && incoming().code == existing().code
+        && incoming().updatedAt == request.time
+        && incoming().diff(existing()).affectedKeys().hasOnly(['label', 'description', 'permissions', 'updatedAt']);
+      allow delete: if false;
+    }
+
+    match /staff_invites/{emailKey} {
+      allow get: if isValidEmailKey(emailKey) && isVerified() && (request.auth.token.email == emailKey || isManagerOrAdmin());
+      allow list: if isVerified() && (isSuperAdminToken() || resource.data.email == request.auth.token.email || resource.data.assignedByUid == request.auth.uid);
+      allow create: if isValidEmailKey(emailKey) && isManagerOrAdmin() && isValidStaffInvite(incoming())
+        && incoming().assignedByUid == request.auth.uid
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time
+        && (isSuperAdmin() || incoming().role != 'SUPER_ADMIN');
+      allow update: if isValidEmailKey(emailKey) && isManagerOrAdmin() && isValidStaffInvite(incoming())
+        && incoming().email == existing().email
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && (isSuperAdmin() || (existing().role != 'SUPER_ADMIN' && incoming().role != 'SUPER_ADMIN'))
+        && incoming().diff(existing()).affectedKeys().hasOnly(['displayName', 'role', 'isActive', 'updatedAt']);
+      allow delete: if isValidEmailKey(emailKey) && isSuperAdmin();
+    }
+
+    // Menu Catalog
+    match /categories/{categoryId} {
+      allow get: if isValidId(categoryId) && isStaff();
+      allow list: if isVerified() && (isSuperAdminToken() || resource.data.isActive is bool);
+      allow create: if isValidId(categoryId) && isManagerOrAdmin() && isValidCategory(incoming())
+        && incoming().createdByUid == request.auth.uid
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time;
+      allow update: if isValidId(categoryId) && isManagerOrAdmin() && isValidCategory(incoming())
+        && incoming().createdByUid == existing().createdByUid
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && incoming().diff(existing()).affectedKeys().hasOnly(['name', 'sortOrder', 'isActive', 'availableFrom', 'availableTo', 'updatedAt']);
+      allow delete: if isValidId(categoryId) && isManagerOrAdmin();
+    }
+
+    match /products/{productId} {
+      allow get: if isValidId(productId) && isStaff();
+      allow list: if isVerified() && (isSuperAdminToken() || resource.data.isAvailable is bool);
+      allow create: if isValidId(productId) && isManagerOrAdmin() && isValidProduct(incoming())
+        && exists(/databases/$(database)/documents/categories/$(incoming().categoryId))
+        && incoming().createdByUid == request.auth.uid
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time;
+      allow update: if isValidId(productId) && isManagerOrAdmin() && isValidProduct(incoming())
+        && incoming().createdByUid == existing().createdByUid
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && incoming().diff(existing()).affectedKeys().hasOnly(['categoryId', 'categoryName', 'name', 'description', 'basePrice', 'imageUrl', 'isAvailable', 'isVeg', 'taxRate', 'availableFrom', 'availableTo', 'addonGroupIds', 'updatedAt']);
+      allow delete: if isValidId(productId) && isManagerOrAdmin();
+    }
+
+    match /product_variants/{variantId} {
+      allow get: if isValidId(variantId) && isStaff();
+      allow list: if isVerified() && (isSuperAdminToken() || resource.data.price is number);
+      allow create: if isValidId(variantId) && isManagerOrAdmin() && isValidProductVariant(incoming())
+        && incoming().createdByUid == request.auth.uid
+        && incoming().createdAt == request.time;
+      allow update: if isValidId(variantId) && isManagerOrAdmin() && isValidProductVariant(incoming())
+        && incoming().productId == existing().productId
+        && incoming().createdByUid == existing().createdByUid
+        && incoming().createdAt == existing().createdAt
+        && incoming().diff(existing()).affectedKeys().hasOnly(['name', 'price', 'isDefault']);
+      allow delete: if isValidId(variantId) && isManagerOrAdmin();
+    }
+
+    match /addon_groups/{groupId} {
+      allow get: if isValidId(groupId) && isStaff();
+      allow list: if isVerified() && (isSuperAdminToken() || resource.data.maxSelect is number);
+      allow create: if isValidId(groupId) && isManagerOrAdmin() && isValidAddonGroup(incoming())
+        && incoming().createdByUid == request.auth.uid
+        && incoming().createdAt == request.time;
+      allow update: if isValidId(groupId) && isManagerOrAdmin() && isValidAddonGroup(incoming())
+        && incoming().createdByUid == existing().createdByUid
+        && incoming().createdAt == existing().createdAt
+        && incoming().diff(existing()).affectedKeys().hasOnly(['name', 'isRequired', 'maxSelect']);
+      allow delete: if isValidId(groupId) && isManagerOrAdmin();
+    }
+
+    match /addons/{addonId} {
+      allow get: if isValidId(addonId) && isStaff();
+      allow list: if isVerified() && (isSuperAdminToken() || resource.data.isAvailable is bool);
+      allow create: if isValidId(addonId) && isManagerOrAdmin() && isValidAddon(incoming())
+        && incoming().createdByUid == request.auth.uid
+        && incoming().createdAt == request.time;
+      allow update: if isValidId(addonId) && isManagerOrAdmin() && isValidAddon(incoming())
+        && incoming().groupId == existing().groupId
+        && incoming().createdByUid == existing().createdByUid
+        && incoming().createdAt == existing().createdAt
+        && incoming().diff(existing()).affectedKeys().hasOnly(['name', 'price', 'isAvailable']);
+      allow delete: if isValidId(addonId) && isManagerOrAdmin();
+    }
+
+    // Tables
+    match /tables/{tableId} {
+      allow get: if isValidId(tableId) && isStaff();
+      allow list: if isVerified() && (isSuperAdminToken() || resource.data.status in ['AVAILABLE', 'OCCUPIED', 'RESERVED', 'BILLING']);
+      allow create: if isValidId(tableId) && isManagerOrAdmin() && isValidRestaurantTable(incoming())
+        && incoming().createdByUid == request.auth.uid
+        && incoming().updatedAt == request.time;
+      allow update: if isValidId(tableId) && isCashierOrAbove() && isValidRestaurantTable(incoming())
+        && incoming().createdByUid == existing().createdByUid
+        && incoming().updatedAt == request.time
+        && (
+          isManagerOrAdmin()
+          || incoming().diff(existing()).affectedKeys().hasOnly(['status', 'currentOrderId', 'currentOrderNumber', 'updatedAt'])
+        );
+      allow delete: if isValidId(tableId) && isManagerOrAdmin();
+    }
+
+    // Customers (PII protected)
+    match /customers/{customerId} {
+      allow get: if isValidId(customerId) && isCashierOrAbove();
+      allow list: if isVerified() && isAuthorizedStaffRecord(resource.data);
+      allow create: if isValidId(customerId) && isCashierOrAbove() && isValidCustomer(incoming())
+        && incoming().createdByUid == request.auth.uid
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time
+        && incoming().lastOrderAt == request.time;
+      allow update: if isValidId(customerId) && isCashierOrAbove() && isValidCustomer(incoming())
+        && incoming().createdByUid == existing().createdByUid
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && incoming().diff(existing()).affectedKeys().hasOnly(['name', 'phone', 'address', 'totalOrders', 'totalSpent', 'lastOrderAt', 'staffUids', 'updatedAt']);
+      allow delete: if isValidId(customerId) && isSuperAdmin();
+    }
+
+    // Orders & Line Items
+    match /orders/{orderId} {
+      allow get: if isValidId(orderId) && isStaff();
+      allow list: if isVerified() && isAuthorizedStaffRecord(resource.data);
+      allow create: if isValidId(orderId) && isCashierOrAbove() && isValidOrder(incoming())
+        && incoming().createdByUid == request.auth.uid
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time;
+      allow update: if isValidId(orderId) && isStaff() && isValidOrder(incoming())
+        && incoming().orderNumber == existing().orderNumber
+        && incoming().createdByUid == existing().createdByUid
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && (
+          isSuperAdmin()
+          || (
+            existing().status != 'CANCELLED'
+            && (
+              (isManagerOrAdmin() && incoming().diff(existing()).affectedKeys().hasOnly(['status', 'paymentStatus', 'paidAmount', 'paymentMethodsSummary', 'cancelReason', 'inventoryDeducted', 'staffUids', 'updatedAt']))
+              || (isCashierOrAbove() && existing().status != 'COMPLETED' && incoming().diff(existing()).affectedKeys().hasOnly(['status', 'paymentStatus', 'paidAmount', 'paymentMethodsSummary', 'cancelReason', 'inventoryDeducted', 'updatedAt']))
+              || (isCashierOrAbove() && existing().paymentStatus != 'PAID' && incoming().status == existing().status && incoming().diff(existing()).affectedKeys().hasOnly(['paymentStatus', 'paidAmount', 'paymentMethodsSummary', 'inventoryDeducted', 'updatedAt']))
+              || (existing().status in ['NEW', 'PREPARING', 'READY'] && incoming().status in ['PREPARING', 'READY', 'SERVED'] && incoming().diff(existing()).affectedKeys().hasOnly(['status', 'updatedAt']))
+            )
+          )
+        );
+      allow delete: if false;
+
+      match /items/{itemId} {
+        allow get: if isValidId(orderId) && isValidId(itemId) && isStaff();
+        allow list: if isValidId(orderId) && isVerified() && resource.data.orderId == orderId;
+        allow create: if isValidId(orderId) && isValidId(itemId) && isCashierOrAbove() && isValidOrderItem(incoming())
+          && incoming().orderId == orderId
+          && incoming().createdByUid == request.auth.uid
+          && incoming().createdAt == request.time
+          && existsAfter(/databases/$(database)/documents/orders/$(orderId));
+        allow update, delete: if false;
+      }
+
+      match /addons/{addonEntryId} {
+        allow get: if isValidId(orderId) && isValidId(addonEntryId) && isStaff();
+        allow list: if isValidId(orderId) && isVerified() && resource.data.orderId == orderId;
+        allow create: if isValidId(orderId) && isValidId(addonEntryId) && isCashierOrAbove() && isValidOrderItemAddon(incoming())
+          && incoming().orderId == orderId
+          && incoming().createdByUid == request.auth.uid
+          && incoming().createdAt == request.time
+          && existsAfter(/databases/$(database)/documents/orders/$(orderId));
+        allow update, delete: if false;
+      }
+    }
+
+    // Payments
+    match /payments/{paymentId} {
+      allow get: if isValidId(paymentId) && isCashierOrAbove();
+      allow list: if isVerified() && (isSuperAdminToken() || resource.data.receivedByUid == request.auth.uid || (resource.data.keys().hasAny(['staffUids']) && request.auth.uid in resource.data.staffUids));
+      allow create: if isValidId(paymentId) && isCashierOrAbove() && isValidPayment(incoming())
+        && incoming().receivedByUid == request.auth.uid
+        && incoming().createdAt == request.time
+        && existsAfter(/databases/$(database)/documents/orders/$(incoming().orderId));
+      allow update: if isValidId(paymentId) && isManagerOrAdmin() && isValidPayment(incoming())
+        && incoming().orderId == existing().orderId
+        && incoming().orderNumber == existing().orderNumber
+        && incoming().method == existing().method
+        && incoming().amount == existing().amount
+        && incoming().receivedByUid == existing().receivedByUid
+        && incoming().createdAt == existing().createdAt
+        && existing().status == 'COMPLETED'
+        && incoming().status == 'REFUNDED'
+        && incoming().diff(existing()).affectedKeys().hasOnly(['status']);
+      allow delete: if false;
+    }
+
+    // Inventory & Recipes
+    match /ingredients/{ingredientId} {
+      allow get: if isValidId(ingredientId) && isStaff();
+      allow list: if isVerified() && (isSuperAdminToken() || resource.data.unit in ['kg', 'gram', 'litre', 'ml', 'pieces']);
+      allow create: if isValidId(ingredientId) && isManagerOrAdmin() && isValidIngredient(incoming())
+        && incoming().createdByUid == request.auth.uid
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time;
+      allow update: if isValidId(ingredientId) && isCashierOrAbove() && isValidIngredient(incoming())
+        && incoming().createdByUid == existing().createdByUid
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && (
+          isManagerOrAdmin()
+          || incoming().diff(existing()).affectedKeys().hasOnly(['currentStock', 'updatedAt'])
+        );
+      allow delete: if isValidId(ingredientId) && isManagerOrAdmin();
+    }
+
+    match /recipes/{recipeId} {
+      allow get: if isValidId(recipeId) && isStaff();
+      allow list: if isVerified() && (isSuperAdminToken() || resource.data.yieldQty > 0);
+      allow create: if isValidId(recipeId) && isManagerOrAdmin() && isValidRecipe(incoming())
+        && incoming().createdByUid == request.auth.uid
+        && incoming().updatedAt == request.time;
+      allow update: if isValidId(recipeId) && isManagerOrAdmin() && isValidRecipe(incoming())
+        && incoming().productId == existing().productId
+        && incoming().createdByUid == existing().createdByUid
+        && incoming().updatedAt == request.time
+        && incoming().diff(existing()).affectedKeys().hasOnly(['productName', 'yieldQty', 'notes', 'updatedAt']);
+      allow delete: if isValidId(recipeId) && isManagerOrAdmin();
+    }
+
+    match /recipe_items/{recipeItemId} {
+      allow get: if isValidId(recipeItemId) && isStaff();
+      allow list: if isVerified() && (isSuperAdminToken() || resource.data.quantityRequired > 0);
+      allow create: if isValidId(recipeItemId) && isManagerOrAdmin() && isValidRecipeItem(incoming())
+        && incoming().createdByUid == request.auth.uid;
+      allow update: if isValidId(recipeItemId) && isManagerOrAdmin() && isValidRecipeItem(incoming())
+        && incoming().recipeId == existing().recipeId
+        && incoming().productId == existing().productId
+        && incoming().createdByUid == existing().createdByUid
+        && incoming().diff(existing()).affectedKeys().hasOnly(['ingredientId', 'ingredientName', 'unit', 'quantityRequired']);
+      allow delete: if isValidId(recipeItemId) && isManagerOrAdmin();
+    }
+
+    match /stock_movements/{movementId} {
+      allow get: if isValidId(movementId) && isStaff();
+      allow list: if isVerified() && isAuthorizedStaffRecord(resource.data);
+      allow create: if isValidId(movementId) && isCashierOrAbove() && isValidStockMovement(incoming())
+        && incoming().createdByUid == request.auth.uid
+        && incoming().createdAt == request.time;
+      allow update, delete: if false;
+    }
+
+    match /suppliers/{supplierId} {
+      allow get: if isValidId(supplierId) && isManagerOrAdmin();
+      allow list: if isVerified() && (isSuperAdminToken() || resource.data.createdByUid == request.auth.uid);
+      allow create: if isValidId(supplierId) && isManagerOrAdmin() && isValidSupplier(incoming())
+        && incoming().createdByUid == request.auth.uid
+        && incoming().createdAt == request.time;
+      allow update: if isValidId(supplierId) && isManagerOrAdmin() && isValidSupplier(incoming())
+        && incoming().createdByUid == existing().createdByUid
+        && incoming().createdAt == existing().createdAt
+        && incoming().diff(existing()).affectedKeys().hasOnly(['name', 'contactPerson', 'phone', 'email', 'address']);
+      allow delete: if isValidId(supplierId) && isManagerOrAdmin();
+    }
+
+    match /purchases/{purchaseId} {
+      allow get: if isValidId(purchaseId) && isManagerOrAdmin();
+      allow list: if isVerified() && isAuthorizedStaffRecord(resource.data);
+      allow create: if isValidId(purchaseId) && isManagerOrAdmin() && isValidPurchase(incoming())
+        && incoming().createdByUid == request.auth.uid
+        && incoming().createdAt == request.time;
+      allow update: if isValidId(purchaseId) && isManagerOrAdmin() && isValidPurchase(incoming())
+        && incoming().createdByUid == existing().createdByUid
+        && incoming().createdAt == existing().createdAt
+        && incoming().diff(existing()).affectedKeys().hasOnly(['paymentStatus', 'notes', 'staffUids']);
+      allow delete: if false;
+    }
+
+    match /purchase_items/{purchaseItemId} {
+      allow get: if isValidId(purchaseItemId) && isManagerOrAdmin();
+      allow list: if isVerified() && (isSuperAdminToken() || resource.data.createdByUid == request.auth.uid);
+      allow create: if isValidId(purchaseItemId) && isManagerOrAdmin() && isValidPurchaseItem(incoming())
+        && incoming().createdByUid == request.auth.uid;
+      allow update, delete: if false;
+    }
+
+    // Expenses
+    match /expense_categories/{categoryId} {
+      allow get: if isValidId(categoryId) && isManagerOrAdmin();
+      allow list: if isVerified() && (isSuperAdminToken() || resource.data.createdByUid == request.auth.uid);
+      allow create: if isValidId(categoryId) && isManagerOrAdmin() && isValidExpenseCategory(incoming())
+        && incoming().createdByUid == request.auth.uid
+        && incoming().createdAt == request.time;
+      allow update: if isValidId(categoryId) && isManagerOrAdmin() && isValidExpenseCategory(incoming())
+        && incoming().createdByUid == existing().createdByUid
+        && incoming().createdAt == existing().createdAt
+        && incoming().diff(existing()).affectedKeys().hasOnly(['name', 'description']);
+      allow delete: if isValidId(categoryId) && isManagerOrAdmin();
+    }
+
+    match /expenses/{expenseId} {
+      allow get: if isValidId(expenseId) && isManagerOrAdmin();
+      allow list: if isVerified() && (isSuperAdminToken() || resource.data.recordedByUid == request.auth.uid || (resource.data.keys().hasAny(['staffUids']) && request.auth.uid in resource.data.staffUids));
+      allow create: if isValidId(expenseId) && isManagerOrAdmin() && isValidExpense(incoming())
+        && incoming().recordedByUid == request.auth.uid
+        && incoming().createdAt == request.time;
+      allow update: if isValidId(expenseId) && isManagerOrAdmin() && isValidExpense(incoming())
+        && incoming().recordedByUid == existing().recordedByUid
+        && incoming().createdAt == existing().createdAt
+        && incoming().diff(existing()).affectedKeys().hasOnly(['categoryId', 'categoryName', 'amount', 'paymentMethod', 'expenseDate', 'notes', 'staffUids']);
+      allow delete: if isValidId(expenseId) && isSuperAdmin();
+    }
+
+    // Settings
+    match /restaurant_settings/{settingId} {
+      allow get: if isValidId(settingId) && isStaff();
+      allow list: if isVerified() && (isSuperAdminToken() || resource.data.nextOrderNumber >= 1);
+      allow create: if isValidId(settingId) && isSuperAdmin() && isValidRestaurantSettings(incoming())
+        && incoming().updatedAt == request.time;
+      allow update: if isValidId(settingId) && isCashierOrAbove() && isValidRestaurantSettings(incoming())
+        && incoming().updatedAt == request.time
+        && (
+          isSuperAdmin()
+          || incoming().diff(existing()).affectedKeys().hasOnly(['nextOrderNumber', 'updatedAt'])
+        );
+      allow delete: if false;
+    }
+
+    // Audit Logs (immutable)
+    match /audit_logs/{logId} {
+      allow get: if isValidId(logId) && isManagerOrAdmin();
+      allow list: if isVerified() && (isSuperAdminToken() || resource.data.actorUid == request.auth.uid || (resource.data.keys().hasAny(['staffUids']) && request.auth.uid in resource.data.staffUids));
+      allow create: if isValidId(logId) && isStaff() && isValidAuditLog(incoming())
+        && incoming().actorUid == request.auth.uid
+        && incoming().createdAt == request.time;
+      allow update, delete: if false;
+    }
+  }
+}
