@@ -1,28 +1,15 @@
 {
   "rewrites": [
     {
-      "source": "/__/auth/:path*",
-      "destination": "https://formidable-trees-z5jvd.firebaseapp.com/__/auth/:path*"
+      "source": "/api/:path*",
+      "destination": "/api/index"
     },
     {
-      "source": "/__/firebase/:path*",
-      "destination": "https://formidable-trees-z5jvd.firebaseapp.com/__/firebase/:path*"
-    },
-    {
-      "source": "/((?!assets/|src/assets/|__/|sw\\.js|workbox-|manifest\\.webmanifest|favicon\\.ico|icon\\.svg|apple-touch-icon\\.png|pwa-).*)",
+      "source": "/((?!api/|assets/|src/assets/|__/|sw\\.js|workbox-|manifest\\.webmanifest|favicon\\.ico|icon\\.svg|apple-touch-icon\\.png|pwa-).*)",
       "destination": "/index.html"
     }
   ],
   "headers": [
-    {
-      "source": "/(.*)",
-      "headers": [
-        {
-          "key": "Cross-Origin-Opener-Policy",
-          "value": "same-origin-allow-popups"
-        }
-      ]
-    },
     {
       "source": "/sw.js",
       "headers": [

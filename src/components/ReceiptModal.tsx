@@ -1,9 +1,8 @@
 import React, { useEffect, useState } from 'react';
-import { collection, getDocs, query, where } from 'firebase/firestore';
 import { Printer, X } from 'lucide-react';
-import { db, handleFirestoreError, OperationType } from '../lib/firebase';
 import { getLocalOfflineOrder } from '../lib/offlineDb';
 import { formatCurrency, formatTimestamp } from '../lib/permissions';
+import { getOrderItems } from '../lib/posService';
 import { isLikelyNetworkError, isOfflineOrderId } from '../lib/syncEngine';
 import { Order, OrderItem, PrinterWidth, RestaurantSettings } from '../types/pos';
 
@@ -37,11 +36,9 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
           }
           return;
         }
-        const snap = await getDocs(
-          query(collection(db, 'orders', order.id, 'items'), where('orderId', '==', order.id))
-        );
+        const fetched = await getOrderItems(order.id);
         if (active) {
-          setItems(snap.docs.map((d) => ({ id: d.id, ...d.data() } as OrderItem)));
+          setItems(fetched);
           setLoading(false);
         }
       } catch (err) {
@@ -52,7 +49,10 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
           }
           return;
         }
-        handleFirestoreError(err, OperationType.LIST, `orders/${order.id}/items`);
+        if (active) {
+          setItems([]);
+          setLoading(false);
+        }
       }
     }
     loadItems();

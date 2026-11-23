@@ -1,10 +1,8 @@
 import React, { useState } from 'react';
-import { doc, serverTimestamp, setDoc } from 'firebase/firestore';
 import { AlertTriangle, Plus, Trash2 } from 'lucide-react';
 import { usePos } from '../context/PosContext';
-import { db, handleFirestoreError, OperationType } from '../lib/firebase';
 import { formatCurrency, formatTimestamp } from '../lib/permissions';
-import { saveRecipeWithItems } from '../lib/posService';
+import { saveRecipeWithItems, upsertCatalogDocument } from '../lib/posService';
 import { adjustStockOfflineAware, recordPurchaseOfflineAware } from '../lib/syncEngine';
 import { Ingredient, IngredientUnit, StockMovementType } from '../types/pos';
 
@@ -69,7 +67,7 @@ export const InventoryView: React.FC = () => {
     if (!firebaseUser || !ingName.trim()) return;
     const id = `ing_${Date.now()}`;
     try {
-      await setDoc(doc(db, 'ingredients', id), {
+      await upsertCatalogDocument('ingredients', id, {
         name: ingName.trim(),
         unit: ingUnit,
         currentStock: Math.max(0, ingStock),
@@ -77,14 +75,11 @@ export const InventoryView: React.FC = () => {
         costPerUnit: Math.max(0, ingCost),
         supplierId: suppliers[0]?.id || '',
         supplierName: suppliers[0]?.name || '',
-        createdByUid: firebaseUser.uid,
-        createdAt: serverTimestamp(),
-        updatedAt: serverTimestamp(),
       });
       setIngName('');
       notify('Ingredient added to inventory.', 'success');
-    } catch (err) {
-      handleFirestoreError(err, OperationType.CREATE, `ingredients/${id}`);
+    } catch (err: any) {
+      notify(err?.message || 'Unable to add ingredient.', 'error');
     }
   };
 
@@ -197,22 +192,20 @@ export const InventoryView: React.FC = () => {
     if (!firebaseUser || !supName.trim()) return;
     const id = `sup_${Date.now()}`;
     try {
-      await setDoc(doc(db, 'suppliers', id), {
+      await upsertCatalogDocument('suppliers', id, {
         name: supName.trim(),
         contactPerson: supContact.trim(),
         phone: supPhone.trim(),
         email: '',
         address: supAddress.trim(),
-        createdByUid: firebaseUser.uid,
-        createdAt: serverTimestamp(),
       });
       setSupName('');
       setSupContact('');
       setSupPhone('');
       setSupAddress('');
       notify('Supplier saved.', 'success');
-    } catch (err) {
-      handleFirestoreError(err, OperationType.CREATE, `suppliers/${id}`);
+    } catch (err: any) {
+      notify(err?.message || 'Unable to save supplier.', 'error');
     }
   };
 

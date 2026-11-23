@@ -24,9 +24,18 @@ export type AppSection =
   | 'staff'
   | 'settings';
 
+export interface AuthSessionUser {
+  uid: string;
+  username: string;
+  email: string;
+  displayName: string;
+  role: StaffRole;
+}
+
 export interface UserProfile {
   id: string;
   uid: string;
+  username?: string;
   email: string;
   displayName: string;
   role: StaffRole;

@@ -1,10 +1,8 @@
 import React, { useMemo, useState } from 'react';
-import { doc, serverTimestamp, setDoc } from 'firebase/firestore';
 import { Plus, Trash2, Users, UtensilsCrossed } from 'lucide-react';
 import { usePos } from '../context/PosContext';
-import { db, handleFirestoreError, OperationType } from '../lib/firebase';
 import { hasPermission } from '../lib/permissions';
-import { removeDocument } from '../lib/posService';
+import { removeDocument, upsertCatalogDocument } from '../lib/posService';
 import { setTableStatusOfflineAware } from '../lib/syncEngine';
 import { RestaurantTable, TableStatus } from '../types/pos';
 
@@ -44,7 +42,7 @@ export const TablesView: React.FC = () => {
     if (!firebaseUser || !tableNumber.trim()) return;
     const id = `tbl_${Date.now()}`;
     try {
-      await setDoc(doc(db, 'tables', id), {
+      await upsertCatalogDocument('tables', id, {
         tableNumber: tableNumber.trim(),
         name: tableName.trim() || `Table ${tableNumber.trim()}`,
         capacity: Math.max(1, capacity),
@@ -52,15 +50,13 @@ export const TablesView: React.FC = () => {
         status: 'AVAILABLE',
         currentOrderId: '',
         currentOrderNumber: '',
-        createdByUid: firebaseUser.uid,
-        updatedAt: serverTimestamp(),
       });
       setTableNumber('');
       setTableName('');
       setShowAdd(false);
       notify('Table added to floor plan.', 'success');
-    } catch (err) {
-      handleFirestoreError(err, OperationType.CREATE, `tables/${id}`);
+    } catch (err: any) {
+      notify(err?.message || 'Unable to add table.', 'error');
     }
   };
 

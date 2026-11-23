@@ -17,16 +17,22 @@ import {
 } from 'firebase/firestore';
 import firebaseConfig from '../../firebase-applet-config.json';
 
-const configuredAuthDomain =
-  (import.meta.env.VITE_FIREBASE_AUTH_DOMAIN as string | undefined)?.trim() ||
-  firebaseConfig.authDomain;
+const env = import.meta.env as Record<string, string | undefined>;
 
-const runtimeFirebaseConfig = {
+export const activeFirebaseConfig = {
   ...firebaseConfig,
-  authDomain: configuredAuthDomain,
+  apiKey: env.VITE_FIREBASE_API_KEY?.trim() || firebaseConfig.apiKey,
+  authDomain: env.VITE_FIREBASE_AUTH_DOMAIN?.trim() || firebaseConfig.authDomain,
+  projectId: env.VITE_FIREBASE_PROJECT_ID?.trim() || firebaseConfig.projectId,
+  storageBucket: env.VITE_FIREBASE_STORAGE_BUCKET?.trim() || firebaseConfig.storageBucket,
+  messagingSenderId:
+    env.VITE_FIREBASE_MESSAGING_SENDER_ID?.trim() || firebaseConfig.messagingSenderId,
+  appId: env.VITE_FIREBASE_APP_ID?.trim() || firebaseConfig.appId,
+  firestoreDatabaseId:
+    env.VITE_FIREBASE_DATABASE_ID?.trim() || firebaseConfig.firestoreDatabaseId,
 };
 
-const app = getApps().length > 0 ? getApp() : initializeApp(runtimeFirebaseConfig);
+const app = getApps().length > 0 ? getApp() : initializeApp(activeFirebaseConfig);
 
 export const db = initializeFirestore(
   app,
@@ -35,7 +41,7 @@ export const db = initializeFirestore(
       tabManager: persistentMultipleTabManager(),
     }),
   },
-  firebaseConfig.firestoreDatabaseId
+  activeFirebaseConfig.firestoreDatabaseId
 );
 
 function createFirebaseAuth(): Auth {

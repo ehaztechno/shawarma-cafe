@@ -1,5 +1,4 @@
-import { doc, serverTimestamp, updateDoc } from 'firebase/firestore';
-import { db, handleFirestoreError, OperationType } from './firebase';
+import { ApiError } from './apiClient';
 import {
   deleteLocalOfflineOrder,
   enqueueSyncOperation,
@@ -22,6 +21,7 @@ import {
   recordStockAdjustment,
   saveExpenseEntry,
   updateOrderStatus,
+  upsertCatalogDocument,
 } from './posService';
 import {
   ExpensePaymentMethod,
@@ -44,8 +44,11 @@ export function isOfflineOrderId(id: string): boolean {
 
 export function isLikelyNetworkError(err: unknown): boolean {
   if (typeof navigator !== 'undefined' && !navigator.onLine) return true;
+  if (err instanceof ApiError) {
+    // 502/503/504 are transient gateway drops; 4xx rejections must NOT be swallowed
+    return err.status >= 502 && err.status <= 504;
+  }
   const msg = (err instanceof Error ? err.message : String(err)).toLowerCase();
-  // Never swallow explicit Firestore security rule denials
   if (msg.includes('missing or insufficient permissions') || msg.includes('permission-denied')) {
     return false;
   }
@@ -513,16 +516,15 @@ export async function setTableStatusOfflineAware(params: {
 }): Promise<{ queuedOffline: boolean }> {
   if (typeof navigator !== 'undefined' && navigator.onLine) {
     try {
-      await updateDoc(doc(db, 'tables', params.table.id), {
+      await upsertCatalogDocument('tables', params.table.id, {
         status: params.status,
         currentOrderId: params.status === 'AVAILABLE' ? '' : params.table.currentOrderId,
         currentOrderNumber: params.status === 'AVAILABLE' ? '' : params.table.currentOrderNumber,
-        updatedAt: serverTimestamp(),
       });
       return { queuedOffline: false };
     } catch (err) {
       if (!isLikelyNetworkError(err)) {
-        handleFirestoreError(err, OperationType.UPDATE, `tables/${params.table.id}`);
+        throw err;
       }
     }
   }
@@ -641,11 +643,10 @@ async function replayQueueItem(item: SyncQueueItem): Promise<void> {
     }
 
     case 'TABLE_STATUS': {
-      await updateDoc(doc(db, 'tables', p.tableId), {
+      await upsertCatalogDocument('tables', p.tableId, {
         status: p.status,
         currentOrderId: p.currentOrderId,
         currentOrderNumber: p.currentOrderNumber,
-        updatedAt: serverTimestamp(),
       });
       return;
     }

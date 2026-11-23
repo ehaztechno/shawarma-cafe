@@ -1,10 +1,9 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { collection, onSnapshot, query, where } from 'firebase/firestore';
 import { CheckCircle2, ChefHat, Clock, Printer } from 'lucide-react';
 import { usePos } from '../context/PosContext';
-import { db, handleFirestoreError, OperationType } from '../lib/firebase';
 import { getLocalOfflineOrder } from '../lib/offlineDb';
 import { hasPermission, toDateObj } from '../lib/permissions';
+import { getOrderItems } from '../lib/posService';
 import { isOfflineOrderId, updateOrderStatusOfflineAware } from '../lib/syncEngine';
 import { Order, OrderItem, OrderStatus } from '../types/pos';
 import { ReceiptModal } from './ReceiptModal';
@@ -18,8 +17,8 @@ const KotOrderCard: React.FC<{
   const [items, setItems] = useState<OrderItem[]>([]);
 
   useEffect(() => {
+    let active = true;
     if (isOfflineOrderId(order.id)) {
-      let active = true;
       getLocalOfflineOrder(order.id).then((rec) => {
         if (active && rec) {
           setItems(rec.items);
@@ -30,16 +29,19 @@ const KotOrderCard: React.FC<{
       };
     }
 
-    const unsub = onSnapshot(
-      query(collection(db, 'orders', order.id, 'items'), where('orderId', '==', order.id)),
-      (snap) => {
-        setItems(snap.docs.map((d) => ({ id: d.id, ...d.data() } as OrderItem)));
-      },
-      (err) => {
-        handleFirestoreError(err, OperationType.LIST, `orders/${order.id}/items`);
-      }
-    );
-    return () => unsub();
+    getOrderItems(order.id)
+      .then((fetched) => {
+        if (active) {
+          setItems(fetched);
+        }
+      })
+      .catch(() => {
+        // Fallback preview text already renders when offline/unavailable
+      });
+
+    return () => {
+      active = false;
+    };
   }, [order.id, order.updatedAt]);
 
   const created = toDateObj(order.createdAt);

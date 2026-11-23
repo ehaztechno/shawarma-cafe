@@ -1,11 +1,9 @@
 import React, { useMemo, useState } from 'react';
-import { collection, getDocs, query, where } from 'firebase/firestore';
 import { Ban, CreditCard, Eye, Printer, RotateCcw, Search, X } from 'lucide-react';
 import { usePos } from '../context/PosContext';
-import { db, handleFirestoreError, OperationType } from '../lib/firebase';
 import { getLocalOfflineOrder } from '../lib/offlineDb';
 import { formatCurrency, formatTimestamp, hasPermission, toDateObj } from '../lib/permissions';
-import { refundOrderPayments } from '../lib/posService';
+import { getOrderItems, refundOrderPayments } from '../lib/posService';
 import {
   cancelOrderOfflineAware,
   isLikelyNetworkError,
@@ -88,16 +86,13 @@ export const OrdersHistoryView: React.FC = () => {
       return;
     }
     try {
-      const snap = await getDocs(
-        query(collection(db, 'orders', order.id, 'items'), where('orderId', '==', order.id))
-      );
-      setInspectItems(snap.docs.map((d) => ({ id: d.id, ...d.data() } as OrderItem)));
-    } catch (err) {
-      if (isLikelyNetworkError(err)) {
-        setInspectItems([]);
-        return;
+      const fetched = await getOrderItems(order.id);
+      setInspectItems(fetched);
+    } catch (err: any) {
+      setInspectItems([]);
+      if (!isLikelyNetworkError(err)) {
+        notify(err?.message || 'Unable to load order items.', 'error');
       }
-      handleFirestoreError(err, OperationType.LIST, `orders/${order.id}/items`);
     }
   };
 

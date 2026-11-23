@@ -1,10 +1,8 @@
 import React, { useMemo, useState } from 'react';
-import { doc, serverTimestamp, setDoc, updateDoc } from 'firebase/firestore';
 import { Edit2, Plus, Trash2, X } from 'lucide-react';
 import { usePos } from '../context/PosContext';
-import { db, handleFirestoreError, OperationType } from '../lib/firebase';
 import { formatCurrency } from '../lib/permissions';
-import { removeDocument, saveProductAndVariants } from '../lib/posService';
+import { removeDocument, saveProductAndVariants, upsertCatalogDocument } from '../lib/posService';
 import { PRODUCT_IMAGE_PRESETS } from '../lib/seedData';
 import { Product } from '../types/pos';
 
@@ -131,13 +129,12 @@ export const MenuManagementView: React.FC = () => {
 
   const toggleProductAvailability = async (prod: Product) => {
     try {
-      await updateDoc(doc(db, 'products', prod.id), {
+      await upsertCatalogDocument('products', prod.id, {
         isAvailable: !prod.isAvailable,
-        updatedAt: serverTimestamp(),
       });
       notify(`${prod.name} marked ${!prod.isAvailable ? 'available' : 'unavailable'}.`, 'info');
-    } catch (err) {
-      handleFirestoreError(err, OperationType.UPDATE, `products/${prod.id}`);
+    } catch (err: any) {
+      notify(err?.message || 'Unable to update product availability.', 'error');
     }
   };
 
@@ -146,20 +143,17 @@ export const MenuManagementView: React.FC = () => {
     if (!firebaseUser || !catName.trim()) return;
     const id = `cat_${Date.now()}`;
     try {
-      await setDoc(doc(db, 'categories', id), {
+      await upsertCatalogDocument('categories', id, {
         name: catName.trim(),
         sortOrder: Number(catOrder) || 1,
         isActive: true,
         availableFrom: catFrom,
         availableTo: catTo,
-        createdByUid: firebaseUser.uid,
-        createdAt: serverTimestamp(),
-        updatedAt: serverTimestamp(),
       });
       setCatName('');
       notify('Category created.', 'success');
-    } catch (err) {
-      handleFirestoreError(err, OperationType.CREATE, `categories/${id}`);
+    } catch (err: any) {
+      notify(err?.message || 'Unable to create category.', 'error');
     }
   };
 
@@ -168,17 +162,15 @@ export const MenuManagementView: React.FC = () => {
     if (!firebaseUser || !grpName.trim()) return;
     const id = `grp_${Date.now()}`;
     try {
-      await setDoc(doc(db, 'addon_groups', id), {
+      await upsertCatalogDocument('addon_groups', id, {
         name: grpName.trim(),
         isRequired: false,
         maxSelect: Math.max(1, grpMax),
-        createdByUid: firebaseUser.uid,
-        createdAt: serverTimestamp(),
       });
       setGrpName('');
       notify('Add-on group created.', 'success');
-    } catch (err) {
-      handleFirestoreError(err, OperationType.CREATE, `addon_groups/${id}`);
+    } catch (err: any) {
+      notify(err?.message || 'Unable to create add-on group.', 'error');
     }
   };
 
@@ -187,18 +179,16 @@ export const MenuManagementView: React.FC = () => {
     if (!firebaseUser || !addonName.trim() || !(addonGroupId || addonGroups[0]?.id)) return;
     const id = `add_${Date.now()}`;
     try {
-      await setDoc(doc(db, 'addons', id), {
+      await upsertCatalogDocument('addons', id, {
         groupId: addonGroupId || addonGroups[0].id,
         name: addonName.trim(),
         price: Math.max(0, Number(addonPrice) || 0),
         isAvailable: true,
-        createdByUid: firebaseUser.uid,
-        createdAt: serverTimestamp(),
       });
       setAddonName('');
       notify('Add-on created.', 'success');
-    } catch (err) {
-      handleFirestoreError(err, OperationType.CREATE, `addons/${id}`);
+    } catch (err: any) {
+      notify(err?.message || 'Unable to create add-on.', 'error');
     }
   };
 
@@ -445,16 +435,15 @@ export const MenuManagementView: React.FC = () => {
                         type="button"
                         onClick={async () => {
                           try {
-                            await updateDoc(doc(db, 'categories', cat.id), {
+                            await upsertCatalogDocument('categories', cat.id, {
                               isActive: !cat.isActive,
-                              updatedAt: serverTimestamp(),
                             });
                             notify(
                               `${cat.name} ${!cat.isActive ? 'enabled' : 'disabled'}.`,
                               'info'
                             );
-                          } catch (err) {
-                            handleFirestoreError(err, OperationType.UPDATE, `categories/${cat.id}`);
+                          } catch (err: any) {
+                            notify(err?.message || 'Unable to update category.', 'error');
                           }
                         }}
                         className="text-xs font-semibold text-orange-600 hover:underline cursor-pointer"

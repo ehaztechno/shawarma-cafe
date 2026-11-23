@@ -146,8 +146,8 @@ export const Sidebar: React.FC<{
             <p className="text-xs font-medium text-stone-900 dark:text-stone-100 truncate">
               {profile?.displayName}
             </p>
-            <p className="text-[11px] text-stone-500 dark:text-stone-400 truncate">
-              {profile?.email}
+            <p className="text-[11px] text-stone-500 dark:text-stone-400 truncate font-mono-num">
+              @{profile?.username || profile?.email}
             </p>
           </div>
           <div className="flex items-center gap-2">
@@ -259,7 +259,7 @@ export const TopHeader: React.FC<{
           <button
             type="button"
             onClick={() => setShowSyncModal(true)}
-            title="Inspect offline storage & Firebase sync queue"
+            title="Inspect offline storage & server sync queue"
             className={`min-h-[36px] inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-xs font-semibold transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
               !isOnline
                 ? 'border-amber-300 bg-amber-50 text-amber-800 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-300'

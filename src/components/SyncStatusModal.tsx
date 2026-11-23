@@ -39,10 +39,10 @@ export const SyncStatusModal: React.FC<{ onClose: () => void }> = ({ onClose }) 
             )}
             <div>
               <h3 className="text-base font-bold text-stone-900 dark:text-stone-100">
-                Offline Storage &amp; Firebase Sync
+                Offline Storage &amp; Server Sync
               </h3>
               <p className="text-xs text-stone-500 dark:text-stone-400">
-                {isOnline ? 'Connected to Firebase' : 'Offline Mode · Queuing in IndexedDB'} ·{' '}
+                {isOnline ? 'Connected to POS Server' : 'Offline Mode · Queuing in IndexedDB'} ·{' '}
                 {swReady ? 'Service Worker Active' : 'Caching App Shell'}
               </p>
             </div>
@@ -109,7 +109,7 @@ export const SyncStatusModal: React.FC<{ onClose: () => void }> = ({ onClose }) 
               <div className="p-6 text-center space-y-1.5">
                 <CheckCircle2 className="w-7 h-7 text-emerald-600 mx-auto" />
                 <p className="font-semibold text-stone-800 dark:text-stone-200">
-                  All POS records are synchronized with Firebase
+                  All POS records are synchronized with the server
                 </p>
                 <p className="text-stone-500">
                   Menu catalog, tables, recipes, and settings are cached locally in IndexedDB for instant offline billing.

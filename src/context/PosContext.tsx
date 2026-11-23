@@ -1,24 +1,6 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
-import {
-  getRedirectResult,
-  onAuthStateChanged,
-  signInWithPopup,
-  signInWithRedirect,
-  signOut,
-  User,
-} from 'firebase/auth';
-import {
-  collection,
-  doc,
-  getDoc,
-  onSnapshot,
-  orderBy,
-  query,
-  serverTimestamp,
-  setDoc,
-} from 'firebase/firestore';
 import { useOnlineStatus } from '../hooks/useOnlineStatus';
-import { auth, db, googleAuthProvider, handleFirestoreError, OperationType } from '../lib/firebase';
+import { apiFetch, getApiAuthToken, setApiAuthToken } from '../lib/apiClient';
 import {
   getAllLocalOfflineOrders,
   getAllSyncQueueItems,
@@ -29,18 +11,16 @@ import {
   SyncQueueItem,
 } from '../lib/offlineDb';
 import {
-  BOOTSTRAP_ADMIN_EMAIL,
   canAccessSection,
   getDefaultSectionForRole,
-  hasPermission,
 } from '../lib/permissions';
-import { seedShawarmaCafeData } from '../lib/seedData';
-import { flushSyncQueue, isLikelyNetworkError } from '../lib/syncEngine';
+import { flushSyncQueue } from '../lib/syncEngine';
 import {
   Addon,
   AddonGroup,
   AppSection,
   AuditLog,
+  AuthSessionUser,
   CartAddonSelection,
   CartItem,
   Category,
@@ -71,31 +51,6 @@ export interface ToastMessage {
   text: string;
 }
 
-function formatFirebaseAuthError(err: any): string {
-  const code = err?.code || '';
-  const host = typeof window !== 'undefined' ? window.location.hostname : '';
-  if (code === 'auth/unauthorized-domain') {
-    return `Domain "${host}" is not authorized in Firebase Authentication. Add "${host}" under Firebase Console → Authentication → Settings → Authorized domains (Project: formidable-trees-z5jvd).`;
-  }
-  if (code === 'auth/popup-blocked') {
-    return 'Your browser blocked the Google sign-in popup. Please allow popups or use Redirect Sign-In below.';
-  }
-  if (
-    code === 'auth/popup-closed-by-user' ||
-    code === 'auth/cancelled-popup-request' ||
-    code === 'auth/redirect-cancelled-by-user'
-  ) {
-    return 'Google sign-in was closed before finishing.';
-  }
-  if (code === 'auth/operation-not-supported-in-this-environment') {
-    return 'Popup sign-in is not supported in this browser mode. Try Redirect Sign-In below.';
-  }
-  if (code === 'auth/network-request-failed') {
-    return 'Network error while contacting Google Sign-In. Check your internet connection and try again.';
-  }
-  return `${code ? `[${code}] ` : ''}${err?.message || 'Google Sign-In failed.'}`;
-}
-
 const DEFAULT_SETTINGS: RestaurantSettings = {
   id: 'default',
   restaurantName: 'Shawarma Cafe',
@@ -117,18 +72,48 @@ const DEFAULT_SETTINGS: RestaurantSettings = {
   updatedAt: null,
 };
 
+interface PosStatePayload {
+  settings: RestaurantSettings | null;
+  categories: Category[];
+  products: Product[];
+  variants: ProductVariant[];
+  addonGroups: AddonGroup[];
+  addons: Addon[];
+  tables: RestaurantTable[];
+  orders: Order[];
+  payments: Payment[];
+  customers: Customer[];
+  ingredients: Ingredient[];
+  recipes: Recipe[];
+  recipeItems: RecipeItem[];
+  stockMovements: StockMovement[];
+  suppliers: Supplier[];
+  purchases: Purchase[];
+  expenseCategories: ExpenseCategory[];
+  expenses: Expense[];
+  staffUsers: UserProfile[];
+  auditLogs: AuditLog[];
+}
+
 interface PosContextValue {
-  firebaseUser: User | null;
+  firebaseUser: AuthSessionUser | null;
   profile: UserProfile | null;
   activeRole: StaffRole;
   authLoading: boolean;
   signingIn: boolean;
   authError: string | null;
+  needsSetup: boolean;
+  envAdminConfigured: boolean;
   clearAuthError: () => void;
   dataLoading: boolean;
-  signInWithGoogle: () => Promise<void>;
-  signInWithGoogleRedirect: () => Promise<void>;
+  loginWithPassword: (username: string, password: string) => Promise<void>;
+  bootstrapAdmin: (params: {
+    username: string;
+    displayName: string;
+    password: string;
+  }) => Promise<void>;
   logout: () => Promise<void>;
+  refreshPosState: () => Promise<void>;
   activeSection: AppSection;
   setActiveSection: (s: AppSection) => void;
   isDark: boolean;
@@ -137,7 +122,7 @@ interface PosContextValue {
   notify: (text: string, type?: 'success' | 'error' | 'info') => void;
   dismissToast: (id: string) => void;
 
-  // Live Firestore Data
+  // Live Workspace Data
   settings: RestaurantSettings;
   categories: Category[];
   products: Product[];
@@ -207,12 +192,25 @@ interface PosContextValue {
 
 const PosContext = createContext<PosContextValue | null>(null);
 
+function toSessionUser(profile: UserProfile): AuthSessionUser {
+  const uname = profile.username || profile.email || 'staff';
+  return {
+    uid: profile.uid,
+    username: uname,
+    email: uname,
+    displayName: profile.displayName,
+    role: profile.role,
+  };
+}
+
 export const PosProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const [firebaseUser, setFirebaseUser] = useState<User | null>(null);
+  const [firebaseUser, setFirebaseUser] = useState<AuthSessionUser | null>(null);
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [authLoading, setAuthLoading] = useState(true);
   const [signingIn, setSigningIn] = useState(false);
   const [authError, setAuthError] = useState<string | null>(null);
+  const [needsSetup, setNeedsSetup] = useState(false);
+  const [envAdminConfigured, setEnvAdminConfigured] = useState(false);
   const [dataLoading, setDataLoading] = useState(false);
 
   const [activeSection, setActiveSectionState] = useState<AppSection>('pos');
@@ -225,7 +223,7 @@ export const PosProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   });
   const [toasts, setToasts] = useState<ToastMessage[]>([]);
 
-  // Firestore Collections
+  // Workspace Collections
   const [settings, setSettings] = useState<RestaurantSettings>(DEFAULT_SETTINGS);
   const [categories, setCategories] = useState<Category[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
@@ -245,7 +243,7 @@ export const PosProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [expenseCategories, setExpenseCategories] = useState<ExpenseCategory[]>([]);
   const [expenses, setExpenses] = useState<Expense[]>([]);
   const [staffUsers, setStaffUsers] = useState<UserProfile[]>([]);
-  const [staffInvites, setStaffInvites] = useState<StaffInvite[]>([]);
+  const [staffInvites] = useState<StaffInvite[]>([]);
   const [auditLogs, setAuditLogs] = useState<AuditLog[]>([]);
 
   // Offline & Sync State
@@ -334,6 +332,26 @@ export const PosProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     };
   }, [notify, refreshOfflineState]);
 
+  // Check initial auth/bootstrap status
+  const checkAuthStatus = useCallback(async () => {
+    setAuthLoading(true);
+    try {
+      const status = await apiFetch<{ needsSetup: boolean; envAdminConfigured: boolean }>(
+        '/api/auth/status'
+      );
+      setNeedsSetup(Boolean(status.needsSetup));
+      setEnvAdminConfigured(Boolean(status.envAdminConfigured));
+    } catch {
+      // Offline or unreachable at boot: keep login form ready
+    } finally {
+      setAuthLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void checkAuthStatus();
+  }, [checkAuthStatus]);
+
   // Load persisted cart on user change
   useEffect(() => {
     if (!firebaseUser) return;
@@ -386,233 +404,123 @@ export const PosProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     cartNotes,
   ]);
 
-  // Check redirect sign-in result (if fallback redirect was used on external host)
-  useEffect(() => {
-    getRedirectResult(auth)
-      .then((cred) => {
-        if (cred?.user) {
-          setAuthError(null);
-        }
-      })
-      .catch((err: any) => {
-        const msg = formatFirebaseAuthError(err);
-        if (msg) {
-          setAuthError(msg);
-        }
-      });
+  const applyPosState = useCallback((data: PosStatePayload) => {
+    if (data.settings) setSettings(data.settings);
+    setCategories(data.categories || []);
+    setProducts(data.products || []);
+    setVariants(data.variants || []);
+    setAddonGroups(data.addonGroups || []);
+    setAddons(data.addons || []);
+    setTables(data.tables || []);
+    setOrders(data.orders || []);
+    setPayments(data.payments || []);
+    setCustomers(data.customers || []);
+    setIngredients(data.ingredients || []);
+    setRecipes(data.recipes || []);
+    setRecipeItems(data.recipeItems || []);
+    setStockMovements(data.stockMovements || []);
+    setSuppliers(data.suppliers || []);
+    setPurchases(data.purchases || []);
+    setExpenseCategories(data.expenseCategories || []);
+    setExpenses(data.expenses || []);
+    setStaffUsers(data.staffUsers || []);
+    setAuditLogs(data.auditLogs || []);
   }, []);
 
-  // Auth listener & User Profile Bootstrap
-  useEffect(() => {
-    let unsubProfile: (() => void) | null = null;
-
-    const unsubAuth = onAuthStateChanged(auth, async (user) => {
-      if (unsubProfile) {
-        unsubProfile();
-        unsubProfile = null;
-      }
-      setFirebaseUser(user);
-
-      if (!user) {
+  const refreshPosState = useCallback(async () => {
+    if (!getApiAuthToken()) return;
+    try {
+      const data = await apiFetch<PosStatePayload>('/api/pos/state');
+      applyPosState(data);
+    } catch (err: any) {
+      if (err?.status === 401 || err?.status === 403) {
+        setApiAuthToken(null);
+        setFirebaseUser(null);
         setProfile(null);
-        setAuthLoading(false);
-        return;
+        setAuthError(err.message || 'Session expired. Please sign in again.');
+      }
+    }
+  }, [applyPosState]);
+
+  const hydrateAfterAuth = useCallback(
+    async (userProfile: UserProfile) => {
+      const sessionUser = toSessionUser(userProfile);
+      setProfile(userProfile);
+      setFirebaseUser(sessionUser);
+      setActiveSectionState((prev) =>
+        canAccessSection(userProfile.role, prev)
+          ? prev
+          : getDefaultSectionForRole(userProfile.role)
+      );
+
+      // Hydrate cached snapshot immediately, then fetch fresh state from API
+      const cached = await loadCatalogSnapshot(userProfile.uid);
+      if (cached) {
+        setSettings(cached.settings);
+        setCategories(cached.categories);
+        setProducts(cached.products);
+        setVariants(cached.variants);
+        setAddonGroups(cached.addonGroups);
+        setAddons(cached.addons);
+        setTables(cached.tables);
+        setOrders(cached.orders);
+        setPayments(cached.payments);
+        setCustomers(cached.customers);
+        setIngredients(cached.ingredients);
+        setRecipes(cached.recipes);
+        setRecipeItems(cached.recipeItems);
+        setStockMovements(cached.stockMovements);
+        setSuppliers(cached.suppliers);
+        setPurchases(cached.purchases);
+        setExpenseCategories(cached.expenseCategories);
+        setExpenses(cached.expenses);
+        setLastCachedAtIso(cached.lastCachedAtIso);
       }
 
-      setAuthLoading(true);
-      const userDocRef = doc(db, 'users', user.uid);
-
-      // Hydrate immediately from IndexedDB catalog snapshot so offline/slow boot is instant
-      const cachedSnap = await loadCatalogSnapshot(user.uid);
-      if (cachedSnap) {
-        setSettings(cachedSnap.settings);
-        setCategories(cachedSnap.categories);
-        setProducts(cachedSnap.products);
-        setVariants(cachedSnap.variants);
-        setAddonGroups(cachedSnap.addonGroups);
-        setAddons(cachedSnap.addons);
-        setTables(cachedSnap.tables);
-        setOrders(cachedSnap.orders);
-        setPayments(cachedSnap.payments);
-        setCustomers(cachedSnap.customers);
-        setIngredients(cachedSnap.ingredients);
-        setRecipes(cachedSnap.recipes);
-        setRecipeItems(cachedSnap.recipeItems);
-        setStockMovements(cachedSnap.stockMovements);
-        setSuppliers(cachedSnap.suppliers);
-        setPurchases(cachedSnap.purchases);
-        setExpenseCategories(cachedSnap.expenseCategories);
-        setExpenses(cachedSnap.expenses);
-        setLastCachedAtIso(cachedSnap.lastCachedAtIso);
-        if (cachedSnap.profile && !navigator.onLine) {
-          setProfile(cachedSnap.profile);
-          setActiveSectionState((prev) =>
-            canAccessSection(cachedSnap.profile!.role, prev)
-              ? prev
-              : getDefaultSectionForRole(cachedSnap.profile!.role)
-          );
-          setAuthLoading(false);
-        }
-      }
-
+      setDataLoading(true);
       try {
-        const snap = await getDoc(userDocRef);
-        const normalizedEmail = (user.email || '').toLowerCase();
-        const isBootstrapOwner = normalizedEmail === BOOTSTRAP_ADMIN_EMAIL.toLowerCase();
-
-        if (!snap.exists()) {
-          let assignedRole: StaffRole = isBootstrapOwner ? 'SUPER_ADMIN' : 'PENDING';
-          let activeFlag = isBootstrapOwner;
-
-          if (!isBootstrapOwner && normalizedEmail) {
-            try {
-              const inviteSnap = await getDoc(doc(db, 'staff_invites', normalizedEmail));
-              if (inviteSnap.exists() && inviteSnap.data().isActive === true) {
-                assignedRole = inviteSnap.data().role;
-                activeFlag = true;
-              }
-            } catch {
-              // No invite doc
-            }
-          }
-
-          await setDoc(userDocRef, {
-            uid: user.uid,
-            email: normalizedEmail,
-            displayName: user.displayName || normalizedEmail.split('@')[0] || 'Staff Member',
-            role: assignedRole,
-            isActive: activeFlag,
-            createdAt: serverTimestamp(),
-            updatedAt: serverTimestamp(),
-          });
-        }
-
-        if (isBootstrapOwner && navigator.onLine) {
-          await seedShawarmaCafeData(user.uid);
-        }
-
-        unsubProfile = onSnapshot(
-          userDocRef,
-          (docSnap) => {
-            if (docSnap.exists()) {
-              const data = { id: docSnap.id, ...docSnap.data() } as UserProfile;
-              setProfile(data);
-              setActiveSectionState((prev) =>
-                canAccessSection(data.role, prev) ? prev : getDefaultSectionForRole(data.role)
-              );
-            }
-            setAuthLoading(false);
-          },
-          (err) => {
-            if (isLikelyNetworkError(err) && cachedSnap?.profile) {
-              setAuthLoading(false);
-              return;
-            }
-            handleFirestoreError(err, OperationType.GET, `users/${user.uid}`);
-          }
-        );
-      } catch (err) {
-        if (isLikelyNetworkError(err) && cachedSnap?.profile) {
-          setProfile(cachedSnap.profile);
-          setActiveSectionState((prev) =>
-            canAccessSection(cachedSnap.profile!.role, prev)
-              ? prev
-              : getDefaultSectionForRole(cachedSnap.profile!.role)
-          );
-          setAuthLoading(false);
-          return;
-        }
-        setAuthLoading(false);
-        handleFirestoreError(err, OperationType.WRITE, `users/${user.uid}`);
+        await refreshPosState();
+      } finally {
+        setDataLoading(false);
       }
-    });
-
-    return () => {
-      unsubAuth();
-      if (unsubProfile) unsubProfile();
-    };
-  }, []);
+    },
+    [refreshPosState]
+  );
 
   const activeRole: StaffRole = profile?.isActive ? profile.role : 'PENDING';
 
-  // Real-time Firestore Subscriptions based on authenticated staff role
+  // Keep POS state synchronized across terminals and after mutations
   useEffect(() => {
     if (!firebaseUser || !profile || !profile.isActive || activeRole === 'PENDING') {
       return;
     }
 
-    setDataLoading(true);
-    const unsubs: (() => void)[] = [];
-
-    const subscribe = <T,>(
-      path: string,
-      q: any,
-      setter: React.Dispatch<React.SetStateAction<T[]>>
-    ) => {
-      const u = onSnapshot(
-        q,
-        (snap: any) => {
-          setter(snap.docs.map((d: any) => ({ id: d.id, ...d.data() } as T)));
-        },
-        (err: any) => {
-          handleFirestoreError(err, OperationType.LIST, path);
-        }
-      );
-      unsubs.push(u);
+    const handleMutated = () => {
+      void refreshPosState();
+    };
+    const handleVisibilityOrFocus = () => {
+      if (document.visibilityState === 'visible' && navigator.onLine) {
+        void refreshPosState();
+      }
     };
 
-    // Settings doc
-    unsubs.push(
-      onSnapshot(
-        doc(db, 'restaurant_settings', 'default'),
-        (snap) => {
-          if (snap.exists()) {
-            setSettings({ id: snap.id, ...snap.data() } as RestaurantSettings);
-          }
-          setDataLoading(false);
-        },
-        (err) => handleFirestoreError(err, OperationType.GET, 'restaurant_settings/default')
-      )
-    );
+    window.addEventListener('sc-pos-mutated', handleMutated);
+    window.addEventListener('focus', handleVisibilityOrFocus);
+    document.addEventListener('visibilitychange', handleVisibilityOrFocus);
 
-    // Core operational collections readable by all active staff
-    subscribe('categories', query(collection(db, 'categories'), orderBy('sortOrder', 'asc')), setCategories);
-    subscribe('products', collection(db, 'products'), setProducts);
-    subscribe('product_variants', collection(db, 'product_variants'), setVariants);
-    subscribe('addon_groups', collection(db, 'addon_groups'), setAddonGroups);
-    subscribe('addons', collection(db, 'addons'), setAddons);
-    subscribe('tables', query(collection(db, 'tables'), orderBy('tableNumber', 'asc')), setTables);
-    subscribe('orders', query(collection(db, 'orders'), orderBy('createdAt', 'desc')), setOrders);
-    subscribe('ingredients', query(collection(db, 'ingredients'), orderBy('name', 'asc')), setIngredients);
-    subscribe('recipes', collection(db, 'recipes'), setRecipes);
-    subscribe('recipe_items', collection(db, 'recipe_items'), setRecipeItems);
-
-    if (hasPermission(activeRole, 'pos_billing') || hasPermission(activeRole, 'orders_view')) {
-      subscribe('payments', query(collection(db, 'payments'), orderBy('createdAt', 'desc')), setPayments);
-      subscribe('customers', query(collection(db, 'customers'), orderBy('totalSpent', 'desc')), setCustomers);
-      subscribe('stock_movements', query(collection(db, 'stock_movements'), orderBy('createdAt', 'desc')), setStockMovements);
-    }
-
-    if (hasPermission(activeRole, 'inventory_manage') || hasPermission(activeRole, 'expenses_manage')) {
-      subscribe('suppliers', collection(db, 'suppliers'), setSuppliers);
-      subscribe('purchases', query(collection(db, 'purchases'), orderBy('createdAt', 'desc')), setPurchases);
-      subscribe('expense_categories', collection(db, 'expense_categories'), setExpenseCategories);
-      subscribe('expenses', query(collection(db, 'expenses'), orderBy('createdAt', 'desc')), setExpenses);
-    }
-
-    if (hasPermission(activeRole, 'staff_manage')) {
-      subscribe('staff_invites', collection(db, 'staff_invites'), setStaffInvites);
-      subscribe('audit_logs', query(collection(db, 'audit_logs'), orderBy('createdAt', 'desc')), setAuditLogs);
-    }
-
-    if (activeRole === 'SUPER_ADMIN') {
-      subscribe('users', collection(db, 'users'), setStaffUsers);
-    }
+    const interval = window.setInterval(() => {
+      if (document.visibilityState === 'visible' && navigator.onLine) {
+        void refreshPosState();
+      }
+    }, 4000);
 
     return () => {
-      unsubs.forEach((u) => u());
+      window.removeEventListener('sc-pos-mutated', handleMutated);
+      window.removeEventListener('focus', handleVisibilityOrFocus);
+      document.removeEventListener('visibilitychange', handleVisibilityOrFocus);
+      window.clearInterval(interval);
     };
-  }, [firebaseUser, profile, activeRole]);
+  }, [firebaseUser, profile, activeRole, refreshPosState]);
 
   // Persist live catalog & operational snapshot to IndexedDB whenever data updates
   useEffect(() => {
@@ -692,8 +600,9 @@ export const PosProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         await refreshOfflineState();
         if (res.syncedCount > 0) {
           setLastSyncedAtIso(new Date().toISOString());
+          await refreshPosState();
           notify(
-            `Synced ${res.syncedCount} offline ${res.syncedCount === 1 ? 'record' : 'records'} to Firebase.`,
+            `Synced ${res.syncedCount} offline ${res.syncedCount === 1 ? 'record' : 'records'}.`,
             'success'
           );
         }
@@ -707,7 +616,7 @@ export const PosProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         setIsSyncing(false);
       }
     },
-    [notify, refreshOfflineState]
+    [notify, refreshOfflineState, refreshPosState]
   );
 
   const discardSyncQueueItem = useCallback(
@@ -749,57 +658,70 @@ export const PosProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   const clearAuthError = useCallback(() => setAuthError(null), []);
 
-  const formatAuthErrorMessage = useCallback((err: any): string => {
-    return formatFirebaseAuthError(err);
-  }, []);
-
-  const signInWithGoogleRedirect = useCallback(async () => {
-    setSigningIn(true);
-    setAuthError(null);
-    try {
-      await signInWithRedirect(auth, googleAuthProvider);
-    } catch (err: any) {
-      const msg = formatAuthErrorMessage(err);
-      setAuthError(msg);
-      notify(msg, 'error');
-      setSigningIn(false);
-    }
-  }, [formatAuthErrorMessage, notify]);
-
-  const signInWithGoogle = useCallback(async () => {
-    setSigningIn(true);
-    setAuthError(null);
-    try {
-      await signInWithPopup(auth, googleAuthProvider);
-    } catch (err: any) {
-      const code = err?.code || '';
-      const isTopLevelWindow = typeof window !== 'undefined' && window.self === window.top;
-      if (
-        isTopLevelWindow &&
-        (code === 'auth/popup-blocked' || code === 'auth/operation-not-supported-in-this-environment')
-      ) {
-        try {
-          await signInWithRedirect(auth, googleAuthProvider);
-          return;
-        } catch (redirectErr: any) {
-          const msg = formatAuthErrorMessage(redirectErr);
-          setAuthError(msg);
-          notify(msg, 'error');
-        }
-      } else {
-        const msg = formatAuthErrorMessage(err);
+  const loginWithPassword = useCallback(
+    async (username: string, password: string) => {
+      setSigningIn(true);
+      setAuthError(null);
+      try {
+        const res = await apiFetch<{ token: string; profile: UserProfile }>(
+          '/api/auth/login',
+          {
+            method: 'POST',
+            body: JSON.stringify({ username, password }),
+          }
+        );
+        setApiAuthToken(res.token);
+        await hydrateAfterAuth(res.profile);
+      } catch (err: any) {
+        const msg = err?.message || 'Unable to sign in. Check your username and password.';
         setAuthError(msg);
         notify(msg, 'error');
+      } finally {
+        setSigningIn(false);
       }
-    } finally {
-      setSigningIn(false);
-    }
-  }, [formatAuthErrorMessage, notify]);
+    },
+    [hydrateAfterAuth, notify]
+  );
+
+  const bootstrapAdmin = useCallback(
+    async (params: { username: string; displayName: string; password: string }) => {
+      setSigningIn(true);
+      setAuthError(null);
+      try {
+        const res = await apiFetch<{ token: string; profile: UserProfile }>(
+          '/api/auth/bootstrap',
+          {
+            method: 'POST',
+            body: JSON.stringify(params),
+          }
+        );
+        setApiAuthToken(res.token);
+        setNeedsSetup(false);
+        await hydrateAfterAuth(res.profile);
+        notify('Store Admin account created and starter menu loaded.', 'success');
+      } catch (err: any) {
+        const msg = err?.message || 'Unable to create initial admin account.';
+        setAuthError(msg);
+        notify(msg, 'error');
+      } finally {
+        setSigningIn(false);
+      }
+    },
+    [hydrateAfterAuth, notify]
+  );
 
   const logout = useCallback(async () => {
+    setApiAuthToken(null);
     setAuthError(null);
-    await signOut(auth);
-  }, []);
+    setFirebaseUser(null);
+    setProfile(null);
+    setOrders([]);
+    setPayments([]);
+    setCustomers([]);
+    setStaffUsers([]);
+    setAuditLogs([]);
+    await checkAuthStatus();
+  }, [checkAuthStatus]);
 
   const addToCart = useCallback(
     ({
@@ -900,13 +822,14 @@ export const PosProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   const reseedMenu = useCallback(async () => {
     if (!firebaseUser) return;
-    const seeded = await seedShawarmaCafeData(firebaseUser.uid);
-    if (seeded) {
+    const res = await apiFetch<{ seeded: boolean }>('/api/pos/reseed', { method: 'POST' });
+    await refreshPosState();
+    if (res.seeded) {
       notify('Shawarma Cafe starter menu and inventory initialized.', 'success');
     } else {
       notify('Menu and settings already exist in database.', 'info');
     }
-  }, [firebaseUser, notify]);
+  }, [firebaseUser, notify, refreshPosState]);
 
   const activeStaffUids = useMemo(() => {
     const ids = staffUsers.filter((u) => u.isActive).map((u) => u.uid);
@@ -916,7 +839,7 @@ export const PosProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     return ids.slice(0, 20);
   }, [staffUsers, firebaseUser]);
 
-  // Merge offline-created provisional orders with live/cached Firestore orders
+  // Merge offline-created provisional orders with live/cached orders
   const mergedOrders = useMemo(() => {
     if (localOfflineOrders.length === 0) return orders;
     const offlineList = localOfflineOrders.map((r) => r.order);
@@ -963,11 +886,14 @@ export const PosProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     authLoading,
     signingIn,
     authError,
+    needsSetup,
+    envAdminConfigured,
     clearAuthError,
     dataLoading,
-    signInWithGoogle,
-    signInWithGoogleRedirect,
+    loginWithPassword,
+    bootstrapAdmin,
     logout,
+    refreshPosState,
     activeSection,
     setActiveSection,
     isDark,
@@ -1035,8 +961,8 @@ export const PosProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   return <PosContext.Provider value={value}>{children}</PosContext.Provider>;
 };
 
-export function usePos() {
+export function usePos(): PosContextValue {
   const ctx = useContext(PosContext);
-  if (!ctx) throw new Error('usePos must be used within PosProvider');
+  if (!ctx) throw new Error('usePos must be used inside PosProvider');
   return ctx;
 }

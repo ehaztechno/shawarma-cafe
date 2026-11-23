@@ -1,9 +1,8 @@
 import React, { useMemo, useState } from 'react';
-import { doc, serverTimestamp, setDoc } from 'firebase/firestore';
 import { Search, UserPlus } from 'lucide-react';
 import { usePos } from '../context/PosContext';
-import { db, handleFirestoreError, OperationType } from '../lib/firebase';
 import { formatCurrency, formatTimestamp } from '../lib/permissions';
+import { upsertCatalogDocument } from '../lib/posService';
 import { Customer } from '../types/pos';
 
 export const CustomersView: React.FC = () => {
@@ -53,24 +52,22 @@ export const CustomersView: React.FC = () => {
     if (!firebaseUser || !name.trim() || phone.trim().length < 5) return;
     const id = `cust_${Date.now()}`;
     try {
-      await setDoc(doc(db, 'customers', id), {
+      const nowIso = new Date().toISOString();
+      await upsertCatalogDocument('customers', id, {
         name: name.trim(),
         phone: phone.trim(),
         address: address.trim(),
         totalOrders: 0,
         totalSpent: 0,
-        lastOrderAt: serverTimestamp(),
-        createdByUid: firebaseUser.uid,
+        lastOrderAt: nowIso,
         staffUids: activeStaffUids,
-        createdAt: serverTimestamp(),
-        updatedAt: serverTimestamp(),
       });
       setName('');
       setPhone('');
       setAddress('');
       notify('Customer added to CRM.', 'success');
-    } catch (err) {
-      handleFirestoreError(err, OperationType.CREATE, `customers/${id}`);
+    } catch (err: any) {
+      notify(err?.message || 'Unable to add customer.', 'error');
     }
   };
 
